@@ -1,0 +1,14 @@
+[package]
+name = "openapi_to_rust"
+version = "0.1.0"
+authors = ["Cameron Taggart <cameron.taggart@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+openapi = { git = "https://github.com/ctaggart/openapi", branch = "msrest" }
+quote = "*"
+rustfmt-nightly = "*"
+proc-macro2 = { version = "*", default-features = false }
+serde_yaml = "*"
+heck = "*"
+regex = "*"
