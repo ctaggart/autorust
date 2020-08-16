@@ -3,7 +3,6 @@ use openapi::v2::{Operation, Parameter, ParameterOrRef, PathItem, Schema};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
-use rustfmt_nightly::{Config, Edition, EmitMode, Input, Session, Verbosity};
 use std::{
     collections::{BTreeMap, HashSet},
     fs::File,
@@ -215,22 +214,38 @@ fn create_struct(struct_name: &str, definition: &openapi::v2::schema::Schema) ->
     streams
 }
 
-fn write_file(tokens: &TokenStream, path: &str) {
-    // from RLS format.fs
-    // https://github.com/rust-lang/rls/blob/master/rls/src/actions/format.rs
-    let mut config = Config::default();
-    config.set().edition(Edition::Edition2018);
-    config.set().emit_mode(EmitMode::Stdout);
-    config.set().skip_children(true);
-    config.set().verbose(Verbosity::Quiet);
-    let mut buf = Vec::<u8>::new();
-    {
-        let mut session = Session::new(config, Some(&mut buf));
-        session.format(Input::Text(tokens.to_string())).unwrap();
+fn format_code(unformatted: String) -> String {
+    let mut config = rustfmt_nightly::Config::default();
+    config.set().edition(rustfmt_nightly::Edition::Edition2018);
+    config.set().max_width(140);
+    let setting = rustfmt_nightly::OperationSetting {
+        verbosity: rustfmt_nightly::emitter::Verbosity::Quiet,
+        ..rustfmt_nightly::OperationSetting::default()
+    };
+    match rustfmt_nightly::format(rustfmt_nightly::Input::Text(unformatted.clone()), &config, setting){
+        Ok(report) => {
+            match report.format_result().next() {
+                Some((_, format_result)) => {
+                    let formatted = format_result.formatted_text();
+                    if formatted.is_empty() {
+                        unformatted
+                    } else {
+                        formatted.to_owned()
+                    }
+                }
+                _ => unformatted
+            }
+        }
+        Err(_err) => {
+            unformatted
+        }
     }
+}
+
+fn write_file(tokens: &TokenStream, path: &str) {
+    let code = format_code(tokens.to_string());
     let mut buffer = File::create(path).unwrap();
-    buffer.write_all(&buf).unwrap();
-    // println!("{:?}", String::from_utf8(buf).unwrap());
+    buffer.write_all(&code.as_bytes()).unwrap();
 }
 
 #[allow(dead_code)]
