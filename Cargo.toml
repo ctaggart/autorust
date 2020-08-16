@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 openapi = { git = "https://github.com/ctaggart/openapi", branch = "msrest" }
 quote = "*"
-rustfmt-nightly = "*"
+rustfmt-nightly = { git = "https://github.com/rust-lang/rustfmt" }
 proc-macro2 = { version = "*", default-features = false }
 serde_yaml = "*"
 heck = "*"
