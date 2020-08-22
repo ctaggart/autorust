@@ -1,5 +1,5 @@
 use heck::{CamelCase, SnakeCase};
-use openapi::v2::{Operation, Parameter, ParameterOrRef, PathItem, Schema};
+use openapi::v2::{Operation, Parameter, ParameterOrRef, PathItem, Reference, Schema};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
@@ -84,7 +84,7 @@ fn create_enum(struct_name: &str, property_name: &str, enum_values: Vec<&str>) -
 // type: "string", "array", "integer"
 // format: "uuid", "date-time", "i32"
 fn to_rust_type(
-    ref_path: Option<&str>,
+    ref_uri: Option<&str>,
     schema_type: Option<&str>,
     items: Option<&Schema>,
     _schema_format: Option<&str>, // TODO
@@ -96,12 +96,12 @@ fn to_rust_type(
     // , enums: Option<Vec<&str>>
     // println!("to_rust_type {:?} {:?} {:?}", ref_path, schema_type, schema_format)
     let mut enum_ts: Option<TokenStream> = None;
-    let tp = if let Some(ref_path) = ref_path {
-        if let Some(i) = ref_path.rfind('/') {
-            let id = ident(&ref_path[i + 1..].to_camel_case());
+    let tp = if let Some(ref_uri) = ref_uri {
+        if let Some(i) = ref_uri.rfind('/') {
+            let id = ident(&ref_uri[i + 1..].to_camel_case());
             TokenStream::from(quote! {#id})
         } else {
-            let id = ident(&ref_path.to_camel_case());
+            let id = ident(&ref_uri.to_camel_case());
             TokenStream::from(quote! {#id})
         }
     } else if let Some(enum_values) = enum_values {
@@ -164,7 +164,7 @@ fn create_struct(struct_name: &str, definition: &openapi::v2::schema::Schema) ->
             let items: Option<&Schema> = property.items.as_ref().map(Box::as_ref);
 
             let (tp, inner_tp) = to_rust_type(
-                property.ref_path.as_ref().map(String::as_ref),
+                property.ref_uri.as_ref().map(String::as_ref),
                 property.schema_type.as_ref().map(String::as_ref),
                 items,
                 property.format.as_ref().map(String::as_ref),
@@ -222,23 +222,23 @@ fn format_code(unformatted: String) -> String {
         verbosity: rustfmt_nightly::emitter::Verbosity::Quiet,
         ..rustfmt_nightly::OperationSetting::default()
     };
-    match rustfmt_nightly::format(rustfmt_nightly::Input::Text(unformatted.clone()), &config, setting){
-        Ok(report) => {
-            match report.format_result().next() {
-                Some((_, format_result)) => {
-                    let formatted = format_result.formatted_text();
-                    if formatted.is_empty() {
-                        unformatted
-                    } else {
-                        formatted.to_owned()
-                    }
+    match rustfmt_nightly::format(
+        rustfmt_nightly::Input::Text(unformatted.clone()),
+        &config,
+        setting,
+    ) {
+        Ok(report) => match report.format_result().next() {
+            Some((_, format_result)) => {
+                let formatted = format_result.formatted_text();
+                if formatted.is_empty() {
+                    unformatted
+                } else {
+                    formatted.to_owned()
                 }
-                _ => unformatted
             }
-        }
-        Err(_err) => {
-            unformatted
-        }
+            _ => unformatted,
+        },
+        Err(_err) => unformatted,
     }
 }
 
@@ -291,9 +291,9 @@ fn trim_ref(path: &str) -> String {
 fn get_param_name<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> String {
     match param {
         ParameterOrRef::Parameter { name, .. } => name.to_string(),
-        ParameterOrRef::Ref { ref_path } => {
-            // println!("get_param_name refpath {}", ref_path);
-            if let Some(param) = ref_param.ref_param(ref_path) {
+        ParameterOrRef::Ref(Reference { ref_uri }) => {
+            // println!("get_param_name refpath {}", ref_uri);
+            if let Some(param) = ref_param.ref_param(ref_uri) {
                 param.name.to_string()
             } else {
                 "ref_param_not_found".to_owned()
@@ -334,13 +334,13 @@ fn get_param_type<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> TokenS
                 quote! { #idt }
             }
         }
-        ParameterOrRef::Ref { ref_path } => {
-            // println!("get_param_type refpath {}", ref_path);
-            if let Some(param) = ref_param.ref_param(ref_path) {
+        ParameterOrRef::Ref(Reference { ref_uri }) => {
+            // println!("get_param_type refpath {}", ref_uri);
+            if let Some(param) = ref_param.ref_param(ref_uri) {
                 if let Some(param_type) = &param.param_type {
                     map_type(param_type)
                 } else {
-                    let idt = ident("NoParamTyp2");
+                    let idt = ident("NoParamType2");
                     quote! { #idt }
                 }
             } else {
@@ -389,7 +389,7 @@ fn get_type_for_schema(schema: &Schema) -> TokenStream {
     // TODO items, schema.enum_values
     let items: Option<&Schema> = schema.items.as_ref().map(Box::as_ref);
     let (tp, _extra) = to_rust_type(
-        schema.ref_path.as_deref(),
+        schema.ref_uri.as_deref(),
         schema.schema_type.as_deref(),
         items,
         schema.format.as_deref(),
@@ -511,12 +511,24 @@ fn create_api_client(spec: &openapi::v2::schema::Spec) -> TokenStream {
     file
 }
 
-fn main() {
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
+
+fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let file = &args[1];
     let fs = File::open(file).expect(&format!("unable to read openapi file {}", file));
-    let spec: openapi::v2::schema::Spec =
-        serde_yaml::from_reader(fs).expect(&format!("unable to read as v2 schema, file {}", file));
+
+    // when spec is yaml
+    // let spec: openapi::v2::schema::Spec =
+    //     serde_yaml::from_reader(fs).expect(&format!("unable to read as v2 schema, file {}", file));
+
+    // when spec is json
+    // specs in azure-rest-api-specs are all openapi v2 json
+    let deserializer = &mut serde_json::Deserializer::from_reader(fs);
+    let spec: openapi::v2::schema::Spec = serde_ignored::deserialize(deserializer, |path| {
+        println!("ignored {}", path.to_string());
+    })?;
 
     // print_params(&spec);
     // print_definitions(&spec);
@@ -531,4 +543,6 @@ fn main() {
     // create api client from operations
     let client = create_api_client(&spec);
     write_file(&client, "client.rs");
+
+    Ok(())
 }
