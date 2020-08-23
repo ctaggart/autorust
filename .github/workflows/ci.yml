@@ -1,0 +1,16 @@
+on: [push, pull_request]
+env:
+  CFG_RELEASE: nightly
+  CFG_RELEASE_CHANNEL: nightly
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: install rust nightly
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        override: true
+    - name: build
+      run: cargo build
