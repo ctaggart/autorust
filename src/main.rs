@@ -158,19 +158,19 @@ fn create_struct(struct_name: &str, definition: &openapi::v2::schema::Schema) ->
         properties.iter().for_each(|(name, property)| {
             let nm = ident(&name.to_snake_case());
             // println!("property {:#?}", property);
-            // println!("enum_values {:#?}", property.enum_values);
+            // println!("enum_ {:#?}", property.enum_);
             let is_required = required.contains(name);
 
             let items: Option<&Schema> = property.items.as_ref().map(Box::as_ref);
 
             let (tp, inner_tp) = to_rust_type(
-                property.ref_uri.as_ref().map(String::as_ref),
-                property.schema_type.as_ref().map(String::as_ref),
+                property.ref_.as_ref().map(String::as_ref),
+                property.type_.as_ref().map(String::as_ref),
                 items,
                 property.format.as_ref().map(String::as_ref),
                 is_required,
                 property
-                    .enum_values
+                    .enum_
                     .as_ref()
                     .map(|v| v.iter().map(String::as_ref).collect()),
                 name,
@@ -290,10 +290,10 @@ fn trim_ref(path: &str) -> String {
 
 fn get_param_name<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> String {
     match param {
-        ParameterOrRef::Parameter { name, .. } => name.to_string(),
-        ParameterOrRef::Ref(Reference { ref_uri }) => {
-            // println!("get_param_name refpath {}", ref_uri);
-            if let Some(param) = ref_param.ref_param(ref_uri) {
+        ParameterOrRef::Parameter(Parameter { name, .. }) => name.to_string(),
+        ParameterOrRef::Ref(Reference { ref_ }) => {
+            // println!("get_param_name refpath {}", ref_);
+            if let Some(param) = ref_param.ref_param(ref_) {
                 param.name.to_string()
             } else {
                 "ref_param_not_found".to_owned()
@@ -316,15 +316,15 @@ fn map_type(param_type: &str) -> TokenStream {
 
 fn get_param_type<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> TokenStream {
     match param {
-        ParameterOrRef::Parameter {
+        ParameterOrRef::Parameter(Parameter {
             //required, // TODO
-            param_type,
+            type_,
             schema,
             ..
-        } => {
+        }) => {
             // let required = required.map_or(false);
-            // param_type.as_ref().map_or("NoParamType".to_owned(), String::from)
-            if let Some(param_type) = param_type {
+            // type_.as_ref().map_or("NoParamType".to_owned(), String::from)
+            if let Some(param_type) = type_ {
                 map_type(param_type)
             } else if let Some(schema) = schema {
                 let tp = get_type_for_schema(schema);
@@ -334,10 +334,10 @@ fn get_param_type<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> TokenS
                 quote! { #idt }
             }
         }
-        ParameterOrRef::Ref(Reference { ref_uri }) => {
-            // println!("get_param_type refpath {}", ref_uri);
-            if let Some(param) = ref_param.ref_param(ref_uri) {
-                if let Some(param_type) = &param.param_type {
+        ParameterOrRef::Ref(Reference { ref_ }) => {
+            // println!("get_param_type refpath {}", ref_);
+            if let Some(param) = ref_param.ref_param(ref_) {
+                if let Some(param_type) = &param.type_ {
                     map_type(param_type)
                 } else {
                     let idt = ident("NoParamType2");
@@ -386,11 +386,11 @@ fn create_function_params<'a>(op: &Operation, ref_param: &'a RefParam) -> TokenS
 }
 
 fn get_type_for_schema(schema: &Schema) -> TokenStream {
-    // TODO items, schema.enum_values
+    // TODO items, schema.enum_
     let items: Option<&Schema> = schema.items.as_ref().map(Box::as_ref);
     let (tp, _extra) = to_rust_type(
-        schema.ref_uri.as_deref(),
-        schema.schema_type.as_deref(),
+        schema.ref_.as_deref(),
+        schema.type_.as_deref(),
         items,
         schema.format.as_deref(),
         true,
