@@ -1,5 +1,5 @@
 use heck::{CamelCase, SnakeCase};
-use openapi::v2::{Operation, Parameter, ParameterOrRef, PathItem, Reference, Schema};
+use openapi::v2::{Operation, Parameter, ParameterOrRef, PathItem, Reference, Schema, DataType};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
@@ -85,7 +85,7 @@ fn create_enum(struct_name: &str, property_name: &str, enum_values: Vec<&str>) -
 // format: "uuid", "date-time", "i32"
 fn to_rust_type(
     ref_uri: Option<&str>,
-    schema_type: Option<&str>,
+    schema_type: Option<&DataType>,
     items: Option<&Schema>,
     _schema_format: Option<&str>, // TODO
     required: bool,
@@ -115,7 +115,7 @@ fn to_rust_type(
 
         if let Some(schema_type) = schema_type {
             match schema_type {
-                "array" => {
+                DataType::Array => {
                     // println!("array items: {:#?}", items);
                     let items = items.expect("array to have item schema");
                     // let item = items.pop().expect("items to not be 0");
@@ -165,7 +165,7 @@ fn create_struct(struct_name: &str, definition: &openapi::v2::schema::Schema) ->
 
             let (tp, inner_tp) = to_rust_type(
                 property.ref_.as_ref().map(String::as_ref),
-                property.type_.as_ref().map(String::as_ref),
+                property.type_.as_ref(),
                 items,
                 property.format.as_ref().map(String::as_ref),
                 is_required,
@@ -390,7 +390,7 @@ fn get_type_for_schema(schema: &Schema) -> TokenStream {
     let items: Option<&Schema> = schema.items.as_ref().map(Box::as_ref);
     let (tp, _extra) = to_rust_type(
         schema.ref_.as_deref(),
-        schema.type_.as_deref(),
+        schema.type_.as_ref(),
         items,
         schema.format.as_deref(),
         true,
