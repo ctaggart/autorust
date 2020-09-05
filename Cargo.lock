@@ -610,7 +610,7 @@ checksum = "2839e79665f131bdb5782e51f2c6c9599c133c6098982a54c794358bf432529c"
 [[package]]
 name = "openapi"
 version = "0.1.5"
-source = "git+https://github.com/ctaggart/openapi?branch=msrest#c5d6db0ae9940b8cd53ee642f77ab1810f99527f"
+source = "git+https://github.com/ctaggart/openapi?branch=msrest#6f9a666d13b43c40d33c869a8ac2f675a65c3760"
 dependencies = [
  "error-chain",
  "failure",
