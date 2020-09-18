@@ -20,6 +20,4 @@ jobs:
         repository: Azure/azure-rest-api-specs
         path: azure-rest-api-specs
     - name: integration tests azure_rest_api_specs
-      run: |
-        cd $GITHUB_WORKSPACE/autorust
-        cargo test --test azure_rest_api_specs
+      run: cargo test --test azure_rest_api_specs
