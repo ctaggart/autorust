@@ -1,38 +1,25 @@
+mod reference;
+
+use autorust_codegen::*;
+use autorust_openapi::{DataType, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
-use openapi::v2::{Operation, Parameter, ParameterOrRef, PathItem, Reference, Schema, DataType};
+use indexmap::{IndexMap, IndexSet};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
+use reference::Reference;
 use regex::Regex;
-use std::{
-    collections::{BTreeMap, HashSet},
-    fs::File,
-    io::prelude::*,
-};
+use std::{fs::File, io::prelude::*, path::Path, process::exit};
 
-fn pathitem_operations(item: &PathItem) -> impl Iterator<Item = &Operation> {
-    vec![
-        item.get.as_ref(),
-        item.post.as_ref(),
-        item.put.as_ref(),
-        item.patch.as_ref(),
-        item.delete.as_ref(),
-        item.options.as_ref(),
-        item.head.as_ref(),
-    ]
-    .into_iter()
-    .filter_map(|x| x)
-}
-
-fn create_client(spec: &openapi::v2::schema::Spec) -> TokenStream {
-    let mut tokens = TokenStream::new();
-    if let Some(definitions) = &spec.definitions {
-        definitions.iter().for_each(|(name, definition)| {
-            for stream in create_struct(name, definition) {
-                tokens.extend(stream);
-            }
-        });
-    };
-    tokens
+fn create_client(reader: &ApiReader) -> TokenStream {
+    // let mut tokens = TokenStream::new();
+    // let definitions = &spec.definitions;
+    // definitions.iter().for_each(|(name, definition)| {
+    //     for stream in create_struct(name, definition) {
+    //         tokens.extend(stream);
+    //     }
+    // });
+    // tokens
+    quote! {} // TODO
 }
 
 fn is_keyword(word: &str) -> bool {
@@ -143,76 +130,71 @@ fn ident(word: &str) -> Ident {
     }
 }
 
-fn create_struct(struct_name: &str, definition: &openapi::v2::schema::Schema) -> Vec<TokenStream> {
-    let mut streams = vec![];
-    let mut props = TokenStream::new();
-    let nm = ident(&struct_name.to_camel_case());
-    // println!("definition {:#?}", definition);
-    let required: HashSet<String> = if let Some(required) = definition.required.clone() {
-        required.into_iter().collect()
-    } else {
-        HashSet::new()
-    };
+// fn create_struct(struct_name: &str, definition: &Schema) -> Vec<TokenStream> {
+//     let mut streams = vec![];
+//     let mut props = TokenStream::new();
+//     let nm = ident(&struct_name.to_camel_case());
+//     // println!("definition {:#?}", definition);
+//     let required: HashSet<String> = definition.required.into_iter().collect();
 
-    if let Some(properties) = &definition.properties {
-        properties.iter().for_each(|(name, property)| {
-            let nm = ident(&name.to_snake_case());
-            // println!("property {:#?}", property);
-            // println!("enum_ {:#?}", property.enum_);
-            let is_required = required.contains(name);
+//     definition.properties.iter().for_each(|(name, property)| {
+//         let nm = ident(&name.to_snake_case());
+//         // println!("property {:#?}", property);
+//         // println!("enum_ {:#?}", property.enum_);
+//         let is_required = required.contains(name);
 
-            let items: Option<&Schema> = property.items.as_ref().map(Box::as_ref);
+//         let items: Option<&Schema> = property.items.as_ref().map(Box::as_ref);
 
-            let (tp, inner_tp) = to_rust_type(
-                property.ref_.as_ref().map(String::as_ref),
-                property.type_.as_ref(),
-                items,
-                property.format.as_ref().map(String::as_ref),
-                is_required,
-                property
-                    .enum_
-                    .as_ref()
-                    .map(|v| v.iter().map(String::as_ref).collect()),
-                name,
-                struct_name,
-            );
-            if let Some(inner_tp) = inner_tp {
-                streams.push(inner_tp);
-            }
-            let skip_serialization_if = if is_required {
-                quote! {}
-            } else {
-                quote! {skip_serializing_if = "Option::is_none"}
-            };
-            let rename = if &nm.to_string() == name {
-                if is_required {
-                    quote! {}
-                } else {
-                    quote! {#[serde(#skip_serialization_if)]}
-                }
-            } else {
-                if is_required {
-                    quote! {#[serde(rename = #name)]}
-                } else {
-                    quote! {#[serde(rename = #name, #skip_serialization_if)]}
-                }
-            };
-            let prop = quote! {
-                #rename
-                #nm: #tp,
-            };
-            props.extend(prop);
-        });
-    }
-    let st = quote! {
-        #[derive(Debug, PartialEq, Serialize, Deserialize)]
-        pub struct #nm {
-            #props
-        }
-    };
-    streams.push(TokenStream::from(st));
-    streams
-}
+//         let (tp, inner_tp) = to_rust_type(
+//             property.ref_.as_ref().map(String::as_ref),
+//             property.type_.as_ref(),
+//             items,
+//             property.format.as_ref().map(String::as_ref),
+//             is_required,
+//             property
+//                 .enum_
+//                 .as_ref()
+//                 .map(|v| v.iter().map(String::as_ref).collect()),
+//             name,
+//             struct_name,
+//         );
+//         if let Some(inner_tp) = inner_tp {
+//             streams.push(inner_tp);
+//         }
+//         let skip_serialization_if = if is_required {
+//             quote! {}
+//         } else {
+//             quote! {skip_serializing_if = "Option::is_none"}
+//         };
+//         let rename = if &nm.to_string() == name {
+//             if is_required {
+//                 quote! {}
+//             } else {
+//                 quote! {#[serde(#skip_serialization_if)]}
+//             }
+//         } else {
+//             if is_required {
+//                 quote! {#[serde(rename = #name)]}
+//             } else {
+//                 quote! {#[serde(rename = #name, #skip_serialization_if)]}
+//             }
+//         };
+//         let prop = quote! {
+//             #rename
+//             #nm: #tp,
+//         };
+//         props.extend(prop);
+//     });
+
+//     let st = quote! {
+//         #[derive(Debug, PartialEq, Serialize, Deserialize)]
+//         pub struct #nm {
+//             #props
+//         }
+//     };
+//     streams.push(TokenStream::from(st));
+//     streams
+// }
 
 fn format_code(unformatted: String) -> String {
     let mut config = rustfmt_nightly::Config::default();
@@ -249,30 +231,56 @@ fn write_file(tokens: &TokenStream, path: &str) {
 }
 
 #[allow(dead_code)]
-fn print_operations(spec: &openapi::v2::schema::Spec) {
+fn print_operations(resolver: &Resolver, reader: &ApiReader) -> Result<()> {
     // paths and operation
-    for (path, item) in &spec.paths {
+    for (path, item) in &reader.api.paths {
         println!("{}", path);
-        for op in pathitem_operations(item) {
-            println!("{:?}", op.operation_id);
+        match item {
+            ReferenceOr::Reference { reference } => {
+                let rf = Reference::parse(reference);
+                println!("  path $ref {:#?}", rf);
+            }
+            ReferenceOr::Item(item) => {
+                for op in pathitem_operations(item) {
+                    println!("  {:?}", op.operation_id);
+
+                    // parameters
+                    // for param in &op.parameters {
+                    //     match param {
+                    //         ReferenceOr::Reference { reference } => {
+                    //             let rf = Reference::parse(reference);
+                    //             println!("    param $ref {:#?}", rf);
+                    //         }
+                    //         ReferenceOr::Item(prm) => {
+                    //             println!("    {:?}", prm.name);
+                    //         }
+                    //     }
+                    // }
+
+                    let params = resolver.resolve_parameters(reader, &op.parameters)?;
+
+                    // responses
+                }
+            }
         }
     }
+    // TODO
+    Ok(())
 }
 
 #[allow(dead_code)]
-fn print_definitions(spec: &openapi::v2::schema::Spec) {
-    for (name, definition) in spec.definitions.as_ref().unwrap() {
-        println!("{}", name);
-        println!("{:#?}", definition);
-    }
+fn print_definitions(spec: &OpenAPI) {
+    // for (name, definition) in spec.definitions {
+    //     println!("{}", name);
+    //     println!("{:#?}", definition);
+    // }
+    // TODO
 }
 
 #[allow(dead_code)]
-fn print_params(spec: &openapi::v2::schema::Spec) {
-    if let Some(ref params) = spec.parameters {
-        for key in params.keys() {
-            println!("param key {:#?}", key);
-        }
+fn print_params(spec: &OpenAPI) {
+    for key in spec.parameters.keys() {
+        println!("param key {:#?}", key);
     }
 }
 
@@ -288,19 +296,19 @@ fn trim_ref(path: &str) -> String {
     path[pos..].to_string()
 }
 
-fn get_param_name<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> String {
-    match param {
-        ParameterOrRef::Parameter(Parameter { name, .. }) => name.to_string(),
-        ParameterOrRef::Ref(Reference { ref_ }) => {
-            // println!("get_param_name refpath {}", ref_);
-            if let Some(param) = ref_param.ref_param(ref_) {
-                param.name.to_string()
-            } else {
-                "ref_param_not_found".to_owned()
-            }
-        }
-    }
-}
+// fn get_param_name<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> String {
+//     match param {
+//         ParameterOrRef::Parameter(Parameter { name, .. }) => name.to_string(),
+//         ParameterOrRef::Ref(Reference { ref_ }) => {
+//             // println!("get_param_name refpath {}", ref_);
+//             if let Some(param) = ref_param.ref_param(ref_) {
+//                 param.name.to_string()
+//             } else {
+//                 "ref_param_not_found".to_owned()
+//             }
+//         }
+//     }
+// }
 
 // simple types in the url
 fn map_type(param_type: &str) -> TokenStream {
@@ -314,48 +322,48 @@ fn map_type(param_type: &str) -> TokenStream {
     }
 }
 
-fn get_param_type<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> TokenStream {
-    match param {
-        ParameterOrRef::Parameter(Parameter {
-            //required, // TODO
-            type_,
-            schema,
-            ..
-        }) => {
-            // let required = required.map_or(false);
-            // type_.as_ref().map_or("NoParamType".to_owned(), String::from)
-            if let Some(param_type) = type_ {
-                map_type(param_type)
-            } else if let Some(schema) = schema {
-                let tp = get_type_for_schema(schema);
-                quote! { &#tp }
-            } else {
-                let idt = ident("NoParamType1");
-                quote! { #idt }
-            }
-        }
-        ParameterOrRef::Ref(Reference { ref_ }) => {
-            // println!("get_param_type refpath {}", ref_);
-            if let Some(param) = ref_param.ref_param(ref_) {
-                if let Some(param_type) = &param.type_ {
-                    map_type(param_type)
-                } else {
-                    let idt = ident("NoParamType2");
-                    quote! { #idt }
-                }
-            } else {
-                let idt = ident("RefParamNotFound");
-                quote! { #idt }
-            }
-        }
-    }
-}
+// fn get_param_type<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> TokenStream {
+//     match param {
+//         ParameterOrRef::Parameter(Parameter {
+//             //required, // TODO
+//             type_,
+//             schema,
+//             ..
+//         }) => {
+//             // let required = required.map_or(false);
+//             // type_.as_ref().map_or("NoParamType".to_owned(), String::from)
+//             if let Some(param_type) = type_ {
+//                 map_type(param_type)
+//             } else if let Some(schema) = schema {
+//                 let tp = get_type_for_schema(schema);
+//                 quote! { &#tp }
+//             } else {
+//                 let idt = ident("NoParamType1");
+//                 quote! { #idt }
+//             }
+//         }
+//         ParameterOrRef::Ref(Reference { ref_ }) => {
+//             // println!("get_param_type refpath {}", ref_);
+//             if let Some(param) = ref_param.ref_param(ref_) {
+//                 if let Some(param_type) = &param.type_ {
+//                     map_type(param_type)
+//                 } else {
+//                     let idt = ident("NoParamType2");
+//                     quote! { #idt }
+//                 }
+//             } else {
+//                 let idt = ident("RefParamNotFound");
+//                 quote! { #idt }
+//             }
+//         }
+//     }
+// }
 
-fn get_param_name_and_type<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> TokenStream {
-    let name = ident(&get_param_name(param, ref_param).to_snake_case());
-    let typ = get_param_type(param, ref_param);
-    quote! { #name: #typ }
-}
+// fn get_param_name_and_type<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> TokenStream {
+//     let name = ident(&get_param_name(param, ref_param).to_snake_case());
+//     let typ = get_param_type(param, ref_param);
+//     quote! { #name: #typ }
+// }
 
 fn parse_params(param_re: &Regex, path: &str) -> Vec<String> {
     // capture 0 is the whole match and 1 is the actual capture like other languages
@@ -372,46 +380,46 @@ fn format_path(param_re: &Regex, path: &str) -> String {
 }
 
 fn create_function_params<'a>(op: &Operation, ref_param: &'a RefParam) -> TokenStream {
-    let mut params: Vec<TokenStream> = if let Some(params) = &op.parameters {
-        params
-            .iter()
-            .map(|p| get_param_name_and_type(p, ref_param))
-            .collect()
-    } else {
-        vec![]
-    };
-    let slf = quote! { &self };
-    params.insert(0, slf);
-    quote! { #(#params),* }
+    // let mut params: Vec<TokenStream> =
+    //     op.parameters
+    //         .iter()
+    //         .map(|p| get_param_name_and_type(p, ref_param))
+    //         .collect();
+
+    // let slf = quote! { &self };
+    // params.insert(0, slf);
+    // quote! { #(#params),* }
+    quote! {} // TODO
 }
 
 fn get_type_for_schema(schema: &Schema) -> TokenStream {
-    // TODO items, schema.enum_
-    let items: Option<&Schema> = schema.items.as_ref().map(Box::as_ref);
-    let (tp, _extra) = to_rust_type(
-        schema.ref_.as_deref(),
-        schema.type_.as_ref(),
-        items,
-        schema.format.as_deref(),
-        true,
-        None,
-        "PropName",
-        "StructName",
-    );
-    tp
+    // // TODO items, schema.enum_
+    // let items: Option<&Schema> = schema.items.as_ref().map(Box::as_ref);
+    // let (tp, _extra) = to_rust_type(
+    //     schema.ref_.as_deref(),
+    //     schema.type_.as_ref(),
+    //     items,
+    //     schema.format.as_deref(),
+    //     true,
+    //     None,
+    //     "PropName",
+    //     "StructName",
+    // );
+    // tp
+    quote! {} // TODO
 }
 
 // TODO is _ref_param not needed for a return
 fn create_function_return<'a>(op: &Operation, _ref_param: &'a RefParam) -> TokenStream {
     // TODO error responses
     // TODO union of respones
-    for (_http_code, rsp) in op.responses.iter() {
-        // println!("response key {:#?} {:#?}", key, rsp);
-        if let Some(schema) = &rsp.schema {
-            let tp = get_type_for_schema(schema);
-            return quote! { Result<#tp> };
-        }
-    }
+    // for (_http_code, rsp) in op.responses.iter() {
+    //     // println!("response key {:#?} {:#?}", key, rsp);
+    //     if let Some(schema) = &rsp.schema {
+    //         let tp = get_type_for_schema(schema);
+    //         return quote! { Result<#tp> };
+    //     }
+    // }
     quote! { Result<()> }
 }
 
@@ -481,67 +489,163 @@ fn create_function<'a>(
 }
 
 struct RefParam<'a> {
-    parameters: &'a Option<BTreeMap<String, Parameter>>,
+    parameters: &'a IndexMap<String, Parameter>,
 }
 
 impl<'a> RefParam<'a> {
     fn ref_param(&self, rf: &str) -> Option<&'a Parameter> {
-        if let Some(parameters) = &self.parameters {
-            parameters.get(&trim_ref(rf))
-        } else {
-            None
-        }
+        self.parameters.get(&trim_ref(rf))
     }
 }
 
-fn create_api_client(spec: &openapi::v2::schema::Spec) -> TokenStream {
-    let mut file = TokenStream::new();
-    let param_re = Regex::new(r"\{(\w+)\}").unwrap();
-    let ref_param = RefParam {
-        parameters: &spec.parameters,
-    };
+fn create_api_client(reader: &ApiReader) -> TokenStream {
+    // let mut file = TokenStream::new();
+    // let param_re = Regex::new(r"\{(\w+)\}").unwrap();
+    // let ref_param = RefParam {
+    //     parameters: &spec.parameters,
+    // };
 
-    for (path, item) in &spec.paths {
-        // println!("{}", path);
-        for op in pathitem_operations(item) {
-            // println!("{:?}", op.operation_id);
-            file.extend(create_function(&path, &op, &param_re, &ref_param))
-        }
-    }
-    file
+    // for (path, item) in &spec.paths {
+    //     // println!("{}", path);
+    //     for op in pathitem_operations(item) {
+    //         // println!("{:?}", op.operation_id);
+    //         file.extend(create_function(&path, &op, &param_re, &ref_param))
+    //     }
+    // }
+    // file
+    quote! {} // TODO
 }
 
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
-pub type Result<T> = std::result::Result<T, Error>;
+type ApiCache = IndexMap<String, ApiReader>;
+pub struct Resolver(ApiCache);
+
+#[derive(Clone, Debug)]
+pub struct ApiReader {
+    pub path: String,
+    pub api: OpenAPI,
+}
+
+impl ApiReader {
+    // fn read_file<'a>(resolver: &'a mut Resolver, path: &str) -> Result<&'a ApiReader>{
+    fn read_file(resolver: &mut Resolver, path: &str) -> Result<ApiReader> {
+        let cache = &mut resolver.0;
+        // let reader = cache.get_mut TODO avoid second lookup
+        match cache.get_mut(path) {
+            Some(_reader) => (),
+            None => {
+                let mut bytes = Vec::new();
+                File::open(path)?.read_to_end(&mut bytes)?;
+                let deserializer = &mut serde_json::Deserializer::from_slice(&bytes);
+                let api: OpenAPI = serde_ignored::deserialize(deserializer, |path| {
+                    // TODO remove side effects
+                    println!("ignored {}", path.to_string());
+                })?;
+                cache.insert(
+                    path.to_string(),
+                    ApiReader {
+                        path: path.to_string(),
+                        api,
+                    },
+                );
+            }
+        }
+        match cache.get(path) {
+            Some(reader) => Ok(reader.to_owned()),
+            None => Err("not in cache")?,
+        }
+    }
+
+    fn read_parameter(param: &ReferenceOr<Parameter>) -> Result<Parameter> {
+        Err("TODO")?
+    }
+}
+
+impl Resolver {
+    // fn read_file(&mut self, path: &str) -> Result<ApiReader>{
+    //     let cache = &mut self.0;
+    //     // let reader = cache.get_mut TODO avoid second lookup
+    //     match cache.get_mut(path){
+    //         Some(_reader) => (),
+    //         None => {
+    //             let mut bytes = Vec::new();
+    //             File::open(path)?.read_to_end(&mut bytes)?;
+    //             let deserializer = &mut serde_json::Deserializer::from_slice(&bytes);
+    //             let api: OpenAPI = serde_ignored::deserialize(deserializer, |path| {
+    //                 // TODO remove side effects
+    //                 println!("ignored {}", path.to_string());
+    //             })?;
+    //             cache.insert(path.to_string(), ApiReader { path: path.to_string(), api});
+    //         }
+    //     }
+    //     match cache.get(path){
+    //         Some(reader) => Ok(reader.to_owned()),
+    //         None => Err("not in cache")?
+    //     }
+    // }
+
+    fn resolve_parameters(
+        &self,
+        reader: &ApiReader,
+        parameters: &Vec<ReferenceOr<Parameter>>,
+    ) -> Result<Vec<Parameter>> {
+        Err("TODO")?
+        // let mut resolved = Vec::new();
+        // for param in parameters {
+        //     match param {
+        //         ReferenceOr::Item(param) => resolved.push(param.clone()),
+        //         ReferenceOr::Reference { reference } => {
+        //             let rf = Reference::parse(reference)?;
+        //             println!("    param $ref {:#?}", rf);
+
+        //             let rdr =
+        //                 match rf.file {
+        //                     Some(file) => {
+        //                         // TODO combine path
+        //                         let path = Path::new(&reader.path).join(file);
+        //                         let path = path.to_str().unwrap();
+        //                         // self.read_file(path)?
+        //                     },
+        //                     None => reader.to_owned(),
+        //                 };
+
+        //         }
+
+        //     }
+        // }
+        // Ok(resolved)
+    }
+}
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let file = &args[1];
-    let fs = File::open(file).expect(&format!("unable to read openapi file {}", file));
+    if args.len() < 2 {
+        eprintln!("path to spec required");
+        exit(1);
+    }
+    let path = &args[1];
 
-    // when spec is yaml
-    // let spec: openapi::v2::schema::Spec =
-    //     serde_yaml::from_reader(fs).expect(&format!("unable to read as v2 schema, file {}", file));
+    // let mut cache = ApiCache::new();
+    let mut resolver = &mut Resolver(ApiCache::new());
+    let reader = &ApiReader::read_file(&mut resolver, &path)?;
 
-    // when spec is json
-    // specs in azure-rest-api-specs are all openapi v2 json
-    let deserializer = &mut serde_json::Deserializer::from_reader(fs);
-    let spec: openapi::v2::schema::Spec = serde_ignored::deserialize(deserializer, |path| {
-        println!("ignored {}", path.to_string());
-    })?;
+    // let ref_files = reader.ref_files()?;
+    // println!("ref_files {:?}", ref_files);
+
+    // let reader = &resolver.read_file(&path)?;
+    // let api = &reader.api;
 
     // print_params(&spec);
     // print_definitions(&spec);
-    // print_operations(&spec);
+    print_operations(resolver, reader)?;
 
     // TODO combine into single file
 
     // create model from definitions
-    let model = create_client(&spec);
+    let model = create_client(reader);
     write_file(&model, "model.rs");
 
     // create api client from operations
-    let client = create_api_client(&spec);
+    let client = create_api_client(reader);
     write_file(&client, "client.rs");
 
     Ok(())

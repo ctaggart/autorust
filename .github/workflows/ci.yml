@@ -14,3 +14,12 @@ jobs:
         override: true
     - name: build
       run: cargo build
+    - name: git clone Azure/azure-rest-api-specs
+      uses: actions/checkout@v2
+      with:
+        repository: Azure/azure-rest-api-specs
+        path: azure-rest-api-specs
+    - name: integration tests azure_rest_api_specs
+      run: |
+        cd $GITHUB_WORKSPACE/autorust_openapi
+        cargo test --test azure_rest_api_specs
