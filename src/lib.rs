@@ -1,13 +1,9 @@
 mod reference;
 
-use autorust_openapi::{DataType, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
-use heck::{CamelCase, SnakeCase};
-use indexmap::{IndexMap, IndexSet};
-use proc_macro2::{Ident, TokenStream};
-use quote::{format_ident, quote};
+use autorust_openapi::{OpenAPI, Operation, PathItem, ReferenceOr};
+use indexmap::IndexSet;
 use reference::Reference;
-use regex::Regex;
-use std::{fs::File, io::prelude::*, path::Path, process::exit};
+use std::{fs::File, io::prelude::*};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
@@ -57,12 +53,11 @@ pub fn get_ref_files(api: &OpenAPI) -> Result<IndexSet<String>> {
     };
 
     // paths and operations
-    for (path, item) in &api.paths {
+    for (_path, item) in &api.paths {
         match item {
             ReferenceOr::Reference { reference } => insert(&reference)?,
             ReferenceOr::Item(item) => {
                 for op in pathitem_operations(&item) {
-                    // println!("  {:?}", op.operation_id);
                     for prm in &op.parameters {
                         match prm {
                             ReferenceOr::Reference { reference } => insert(&reference)?,
@@ -74,7 +69,7 @@ pub fn get_ref_files(api: &OpenAPI) -> Result<IndexSet<String>> {
                     for (_code, rsp) in &op.responses {
                         match &rsp.schema {
                             Some(ReferenceOr::Reference { reference }) => insert(&reference)?,
-                            Some(ReferenceOr::Item(schema)) => {
+                            Some(ReferenceOr::Item(_schema)) => {
                                 // TODO properties
                                 // TODO additionalProperties
                             }

@@ -1,16 +1,15 @@
 mod reference;
 
 use autorust_codegen::*;
-use autorust_openapi::{DataType, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
+use autorust_openapi::{DataType, OpenAPI, Operation, Parameter, Schema};
 use heck::{CamelCase, SnakeCase};
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
-use reference::Reference;
 use regex::Regex;
-use std::{fs::File, io::prelude::*, path::Path, process::exit};
+use std::{fs::File, io::prelude::*, process::exit};
 
-fn create_client(reader: &ApiReader) -> TokenStream {
+fn create_client(api: &OpenAPI) -> TokenStream {
     // let mut tokens = TokenStream::new();
     // let definitions = &spec.definitions;
     // definitions.iter().for_each(|(name, definition)| {
@@ -230,67 +229,6 @@ fn write_file(tokens: &TokenStream, path: &str) {
     buffer.write_all(&code.as_bytes()).unwrap();
 }
 
-#[allow(dead_code)]
-fn print_operations(resolver: &Resolver, reader: &ApiReader) -> Result<()> {
-    // paths and operation
-    for (path, item) in &reader.api.paths {
-        println!("{}", path);
-        match item {
-            ReferenceOr::Reference { reference } => {
-                let rf = Reference::parse(reference);
-                println!("  path $ref {:#?}", rf);
-            }
-            ReferenceOr::Item(item) => {
-                for op in pathitem_operations(item) {
-                    println!("  {:?}", op.operation_id);
-
-                    // parameters
-                    // for param in &op.parameters {
-                    //     match param {
-                    //         ReferenceOr::Reference { reference } => {
-                    //             let rf = Reference::parse(reference);
-                    //             println!("    param $ref {:#?}", rf);
-                    //         }
-                    //         ReferenceOr::Item(prm) => {
-                    //             println!("    {:?}", prm.name);
-                    //         }
-                    //     }
-                    // }
-
-                    let params = resolver.resolve_parameters(reader, &op.parameters)?;
-
-                    // responses
-                }
-            }
-        }
-    }
-    // TODO
-    Ok(())
-}
-
-#[allow(dead_code)]
-fn print_definitions(spec: &OpenAPI) {
-    // for (name, definition) in spec.definitions {
-    //     println!("{}", name);
-    //     println!("{:#?}", definition);
-    // }
-    // TODO
-}
-
-#[allow(dead_code)]
-fn print_params(spec: &OpenAPI) {
-    for key in spec.parameters.keys() {
-        println!("param key {:#?}", key);
-    }
-}
-
-#[allow(dead_code)]
-fn print_responses(spec: &Operation) {
-    for (key, rsp) in spec.responses.iter() {
-        println!("response key {:#?} {:#?}", key, rsp);
-    }
-}
-
 fn trim_ref(path: &str) -> String {
     let pos = path.rfind('/').map_or(0, |i| i + 1);
     path[pos..].to_string()
@@ -498,7 +436,7 @@ impl<'a> RefParam<'a> {
     }
 }
 
-fn create_api_client(reader: &ApiReader) -> TokenStream {
+fn create_api_client(api: &OpenAPI) -> TokenStream {
     // let mut file = TokenStream::new();
     // let param_re = Regex::new(r"\{(\w+)\}").unwrap();
     // let ref_param = RefParam {
@@ -516,106 +454,6 @@ fn create_api_client(reader: &ApiReader) -> TokenStream {
     quote! {} // TODO
 }
 
-type ApiCache = IndexMap<String, ApiReader>;
-pub struct Resolver(ApiCache);
-
-#[derive(Clone, Debug)]
-pub struct ApiReader {
-    pub path: String,
-    pub api: OpenAPI,
-}
-
-impl ApiReader {
-    // fn read_file<'a>(resolver: &'a mut Resolver, path: &str) -> Result<&'a ApiReader>{
-    fn read_file(resolver: &mut Resolver, path: &str) -> Result<ApiReader> {
-        let cache = &mut resolver.0;
-        // let reader = cache.get_mut TODO avoid second lookup
-        match cache.get_mut(path) {
-            Some(_reader) => (),
-            None => {
-                let mut bytes = Vec::new();
-                File::open(path)?.read_to_end(&mut bytes)?;
-                let deserializer = &mut serde_json::Deserializer::from_slice(&bytes);
-                let api: OpenAPI = serde_ignored::deserialize(deserializer, |path| {
-                    // TODO remove side effects
-                    println!("ignored {}", path.to_string());
-                })?;
-                cache.insert(
-                    path.to_string(),
-                    ApiReader {
-                        path: path.to_string(),
-                        api,
-                    },
-                );
-            }
-        }
-        match cache.get(path) {
-            Some(reader) => Ok(reader.to_owned()),
-            None => Err("not in cache")?,
-        }
-    }
-
-    fn read_parameter(param: &ReferenceOr<Parameter>) -> Result<Parameter> {
-        Err("TODO")?
-    }
-}
-
-impl Resolver {
-    // fn read_file(&mut self, path: &str) -> Result<ApiReader>{
-    //     let cache = &mut self.0;
-    //     // let reader = cache.get_mut TODO avoid second lookup
-    //     match cache.get_mut(path){
-    //         Some(_reader) => (),
-    //         None => {
-    //             let mut bytes = Vec::new();
-    //             File::open(path)?.read_to_end(&mut bytes)?;
-    //             let deserializer = &mut serde_json::Deserializer::from_slice(&bytes);
-    //             let api: OpenAPI = serde_ignored::deserialize(deserializer, |path| {
-    //                 // TODO remove side effects
-    //                 println!("ignored {}", path.to_string());
-    //             })?;
-    //             cache.insert(path.to_string(), ApiReader { path: path.to_string(), api});
-    //         }
-    //     }
-    //     match cache.get(path){
-    //         Some(reader) => Ok(reader.to_owned()),
-    //         None => Err("not in cache")?
-    //     }
-    // }
-
-    fn resolve_parameters(
-        &self,
-        reader: &ApiReader,
-        parameters: &Vec<ReferenceOr<Parameter>>,
-    ) -> Result<Vec<Parameter>> {
-        Err("TODO")?
-        // let mut resolved = Vec::new();
-        // for param in parameters {
-        //     match param {
-        //         ReferenceOr::Item(param) => resolved.push(param.clone()),
-        //         ReferenceOr::Reference { reference } => {
-        //             let rf = Reference::parse(reference)?;
-        //             println!("    param $ref {:#?}", rf);
-
-        //             let rdr =
-        //                 match rf.file {
-        //                     Some(file) => {
-        //                         // TODO combine path
-        //                         let path = Path::new(&reader.path).join(file);
-        //                         let path = path.to_str().unwrap();
-        //                         // self.read_file(path)?
-        //                     },
-        //                     None => reader.to_owned(),
-        //                 };
-
-        //         }
-
-        //     }
-        // }
-        // Ok(resolved)
-    }
-}
-
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
@@ -623,29 +461,16 @@ fn main() -> Result<()> {
         exit(1);
     }
     let path = &args[1];
-
-    // let mut cache = ApiCache::new();
-    let mut resolver = &mut Resolver(ApiCache::new());
-    let reader = &ApiReader::read_file(&mut resolver, &path)?;
-
-    // let ref_files = reader.ref_files()?;
-    // println!("ref_files {:?}", ref_files);
-
-    // let reader = &resolver.read_file(&path)?;
-    // let api = &reader.api;
-
-    // print_params(&spec);
-    // print_definitions(&spec);
-    print_operations(resolver, reader)?;
+    let api = &read_api_file(path)?;
 
     // TODO combine into single file
 
     // create model from definitions
-    let model = create_client(reader);
+    let model = create_client(api);
     write_file(&model, "model.rs");
 
     // create api client from operations
-    let client = create_api_client(reader);
+    let client = create_api_client(api);
     write_file(&client, "client.rs");
 
     Ok(())
