@@ -30,3 +30,11 @@ fn ref_files() -> Result<()> {
     assert!(files.contains("../../../../../common-types/resource-management/v1/types.json"));
     Ok(())
 }
+
+// #[test]
+// fn read_spec_avs() -> Result<()> {
+//     let spec = &Spec::read_file("../azure-rest-api-specs/specification/vmware/resource-manager/Microsoft.AVS/stable/2020-03-20/vmware.json")?;
+//     assert_eq!(2, spec.docs.len());
+//     assert!(files.contains("../../../../../common-types/resource-management/v1/types.json"));
+//     Ok(())
+// }

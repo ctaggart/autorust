@@ -1,4 +1,6 @@
+mod path;
 mod reference;
+mod uri_util;
 
 use autorust_openapi::{OpenAPI, Operation, PathItem, ReferenceOr, Schema};
 use indexmap::IndexSet;

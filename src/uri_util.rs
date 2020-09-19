@@ -34,7 +34,7 @@ fn resolve_path(base: &str, path: &str) -> String {
         new_components.push("".to_string());
     }
 
-    format!("/{}", new_components.join("/").trim_left_matches("/")).to_string()
+    format!("/{}", new_components.join("/").trim_start_matches("/")).to_string()
 }
 
 pub fn uri_join(base_uri: uri::Uri, ref_str: &str) -> Result<uri::Uri, uri::InvalidUriParts> {
@@ -43,7 +43,7 @@ pub fn uri_join(base_uri: uri::Uri, ref_str: &str) -> Result<uri::Uri, uri::Inva
         Err(_) => ".".parse::<uri::Uri>().unwrap(),
     };
     let mut joined_parts = uri::Parts::default();
-    if ref_uri.scheme_part() != None {
+    if ref_uri.scheme() != None {
         let ref_uri_parts = ref_uri.into_parts();
         joined_parts.scheme = ref_uri_parts.scheme;
         joined_parts.authority = ref_uri_parts.authority;
@@ -56,7 +56,7 @@ pub fn uri_join(base_uri: uri::Uri, ref_str: &str) -> Result<uri::Uri, uri::Inva
         let base_path_and_query = base_uri_parts.path_and_query.unwrap();
         let base_path = base_path_and_query.path();
         let joined_path = resolve_path(base_path, ref_str);
-        let joined_path_and_query = uri::PathAndQuery::from_shared(joined_path.into()).unwrap();
+        let joined_path_and_query = uri::PathAndQuery::from_maybe_shared(joined_path).unwrap();
         joined_parts.path_and_query = Some(joined_path_and_query);
     }
 
