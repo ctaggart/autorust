@@ -64,14 +64,13 @@ dependencies = [
  "quote",
  "regex",
  "rustfmt-nightly",
- "serde_ignored",
  "serde_json",
 ]
 
 [[package]]
 name = "autorust_openapi"
 version = "0.2.0"
-source = "git+https://github.com/ctaggart/autorust_openapi#42b09032bd7debfc8ff036f3496b18532ed40067"
+source = "git+https://github.com/ctaggart/autorust_openapi#cd9d6168c8f9857ec0de9fdd0c302216f372885d"
 dependencies = [
  "indexmap",
  "serde",
@@ -1141,15 +1140,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_ignored"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c2c7d39d14f2f2ea82239de71594782f186fd03501ac81f0ce08e674819ff2f"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "serde_json"
 version = "1.0.57"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1195,9 +1185,9 @@ checksum = "a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3"
 
 [[package]]
 name = "stacker"
-version = "0.1.11"
+version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a92bc346006ae78c539d6ab2cf1a1532bc657b8339c464877a990ec82073c66f"
+checksum = "21ccb4c06ec57bc82d0f610f1a2963d7648700e43a6f513e564b9c89f7991786"
 dependencies = [
  "cc",
  "cfg-if",

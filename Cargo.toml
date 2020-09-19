@@ -18,7 +18,6 @@ autorust_openapi = { git = "https://github.com/ctaggart/autorust_openapi" }
 quote = "*"
 rustfmt-nightly = { git = "https://github.com/rust-lang/rustfmt" }
 proc-macro2 = { version = "*", default-features = false }
-serde_ignored = "*"
 serde_json = "*"
 heck = "*"
 regex = "*"
