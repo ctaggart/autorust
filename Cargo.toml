@@ -22,4 +22,4 @@ serde_json = "*"
 heck = "*"
 regex = "*"
 indexmap = {version = "*", features = ["serde-1"]}
-http = "*"
+path_abs = "*"

@@ -15,10 +15,10 @@ jobs:
       with:
         toolchain: nightly
         override: true
-    - name: build
+    - name: unit tests
       run: |
         cd $GITHUB_WORKSPACE/autorust
-        cargo build
+        cargo test --lib
     - name: git clone Azure/azure-rest-api-specs
       uses: actions/checkout@v2
       with:
