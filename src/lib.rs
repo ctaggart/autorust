@@ -2,12 +2,35 @@ mod path;
 mod reference;
 
 use autorust_openapi::{OpenAPI, Operation, PathItem, ReferenceOr, Schema};
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
+use path::path_join;
 use reference::Reference;
 use std::{fs::File, io::prelude::*};
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Clone, Debug)]
+pub struct Spec {
+    /// multiple documents for an API specification
+    /// the first one is the root
+    pub docs: IndexMap<String, OpenAPI>,
+}
+
+impl Spec {
+    pub fn read_file(path: &str) -> Result<Self> {
+        let mut docs = IndexMap::new();
+        let root = read_api_file(path)?;
+        let files = get_ref_files(&root)?;
+        docs.insert(path.to_owned(), root);
+        for file in files {
+            let doc_path = path_join(path, &file)?;
+            let doc = read_api_file(&doc_path)?;
+            docs.insert(doc_path, doc);
+        }
+        Ok(Spec { docs })
+    }
+}
 
 pub fn read_api_file(path: &str) -> Result<OpenAPI> {
     let mut bytes = Vec::new();
