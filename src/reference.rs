@@ -1,4 +1,4 @@
-use super::Result;
+use crate::Result;
 
 // https://github.com/OAI/OpenAPI-Specification/blob/master/versions/2.0.md#referenceObject
 // https://swagger.io/specification/#relative-references-in-urls

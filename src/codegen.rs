@@ -1,5 +1,6 @@
 #![allow(unused_variables, dead_code)]
-use autorust_openapi::{DataType, OpenAPI, Operation, Parameter, Schema};
+use crate::{format_code, Spec};
+use autorust_openapi::{DataType, Operation, Parameter, Schema};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::{Ident, TokenStream};
@@ -7,9 +8,7 @@ use quote::{format_ident, quote};
 use regex::Regex;
 use std::{fs::File, io::prelude::*};
 
-use crate::format_code;
-
-pub fn create_client(api: &OpenAPI) -> TokenStream {
+pub fn create_client(spec: &Spec) -> TokenStream {
     // let mut tokens = TokenStream::new();
     // let definitions = &spec.definitions;
     // definitions.iter().for_each(|(name, definition)| {
@@ -408,7 +407,7 @@ impl<'a> RefParam<'a> {
     }
 }
 
-pub fn create_api_client(api: &OpenAPI) -> TokenStream {
+pub fn create_api_client(spec: &Spec) -> TokenStream {
     // let mut file = TokenStream::new();
     // let param_re = Regex::new(r"\{(\w+)\}").unwrap();
     // let ref_param = RefParam {

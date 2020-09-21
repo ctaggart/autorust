@@ -1,7 +1,6 @@
+use crate::Result;
 use path_abs::PathMut;
 use std::path::PathBuf;
-
-use super::Result;
 
 pub fn path_join(a: &str, b: &str) -> Result<String> {
     let mut c = PathBuf::from(a);

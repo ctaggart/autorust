@@ -5,3 +5,4 @@ b.rs
 *.txt
 client.rs
 model.rs
+generated

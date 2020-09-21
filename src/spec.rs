@@ -1,8 +1,7 @@
+use crate::{path_join, Reference, Result};
 use autorust_openapi::{OpenAPI, Operation, PathItem, ReferenceOr, Schema};
 use indexmap::{IndexMap, IndexSet};
 use std::{fs::File, io::prelude::*};
-
-use crate::{path_join, Reference, Result};
 
 #[derive(Clone, Debug)]
 pub struct Spec {

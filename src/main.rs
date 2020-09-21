@@ -1,25 +1,23 @@
-use std::process::exit;
-
-use autorust_codegen::{create_api_client, create_client, read_api_file, write_file, Result};
+use autorust_codegen::{
+    create_api_client, create_client, new_app, new_config, write_file, Result, Spec,
+};
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 {
-        eprintln!("path to spec required");
-        exit(1);
+    let arg_matches = new_app().get_matches();
+    let config = new_config(&arg_matches)?;
+    for input_file in &config.input_files {
+        let spec = &Spec::read_file(input_file)?;
+
+        // TODO naming of files
+        // TODO may be combine into single file
+
+        // create model from definitions
+        let model = create_client(spec);
+        write_file(&model, "model.rs");
+
+        // create api client from operations
+        let client = create_api_client(spec);
+        write_file(&client, "client.rs");
     }
-    let path = &args[1];
-    let api = &read_api_file(path)?;
-
-    // TODO combine into single file
-
-    // create model from definitions
-    let model = create_client(api);
-    write_file(&model, "model.rs");
-
-    // create api client from operations
-    let client = create_api_client(api);
-    write_file(&client, "client.rs");
-
     Ok(())
 }
