@@ -1,5 +1,5 @@
 use crate::{path_join, Reference, Result};
-use autorust_openapi::{OpenAPI, Operation, PathItem, ReferenceOr, Schema};
+use autorust_openapi::{OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use indexmap::{IndexMap, IndexSet};
 use std::{fs::File, io::prelude::*};
 
@@ -8,6 +8,14 @@ pub struct Spec {
     /// multiple documents for an API specification
     /// the first one is the root
     pub docs: IndexMap<String, OpenAPI>,
+    schemas: IndexMap<RefKey, Schema>,
+    parameters: IndexMap<RefKey, Parameter>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct RefKey {
+    file: String,
+    name: String,
 }
 
 impl Spec {
@@ -21,8 +29,171 @@ impl Spec {
             let doc = read_api_file(&doc_path)?;
             docs.insert(doc_path, doc);
         }
-        Ok(Spec { docs })
+
+        let mut schemas: IndexMap<RefKey, Schema> = IndexMap::new();
+        let mut parameters: IndexMap<RefKey, Parameter> = IndexMap::new();
+        for (file, doc) in &docs {
+            for (name, schema) in &doc.definitions {
+                match schema {
+                    ReferenceOr::Reference { reference: _ } => {}
+                    ReferenceOr::Item(schema) => {
+                        // println!("insert schema {} {}", &file, &name);
+                        schemas.insert(
+                            RefKey {
+                                file: file.clone(),
+                                name: name.clone(),
+                            },
+                            schema.clone(),
+                        );
+                    }
+                }
+            }
+            for (name, param) in &doc.parameters {
+                // println!("insert parameter {} {}", &file, &name);
+                parameters.insert(
+                    RefKey {
+                        file: file.clone(),
+                        name: name.clone(),
+                    },
+                    param.clone(),
+                );
+            }
+        }
+
+        Ok(Spec {
+            docs,
+            schemas,
+            parameters,
+        })
     }
+
+    pub fn resolve_schema_ref(&self, doc_file: &str, reference: &str) -> Result<Schema> {
+        let rf = Reference::parse(reference)?;
+        let file = match rf.file {
+            None => doc_file.to_owned(),
+            Some(file) => path_join(doc_file, &file)?,
+        };
+        match rf.name {
+            None => Err(format!("no name in reference {}", &reference))?,
+            Some(nm) => Ok(self
+                .schemas
+                .get(&RefKey {
+                    file: file.clone(),
+                    name: nm.clone(),
+                })
+                .ok_or_else(|| format!("schema not found {} {}", &file, &nm))?
+                .clone()),
+        }
+    }
+
+    pub fn resolve_parameter_ref(&self, doc_file: &str, reference: &str) -> Result<Parameter> {
+        let rf = Reference::parse(reference)?;
+        let file = match rf.file {
+            None => doc_file.to_owned(),
+            Some(file) => path_join(doc_file, &file)?,
+        };
+        match rf.name {
+            None => Err(format!("no name in reference {}", &reference))?,
+            Some(nm) => Ok(self
+                .parameters
+                .get(&RefKey {
+                    file: file.clone(),
+                    name: nm.clone(),
+                })
+                .ok_or_else(|| format!("parameter not found {} {}", &file, &nm))?
+                .clone()),
+        }
+    }
+
+    pub fn resolve_schema(&self, doc_file: &str, schema: &ReferenceOr<Schema>) -> Result<Schema> {
+        match schema {
+            ReferenceOr::Item(schema) => Ok(schema.clone()),
+            ReferenceOr::Reference { reference } => self.resolve_schema_ref(doc_file, reference),
+        }
+    }
+
+    pub fn resolve_schemas(
+        &self,
+        path: &str,
+        schemas: &IndexMap<String, ReferenceOr<Schema>>,
+    ) -> Result<IndexMap<String, Schema>> {
+        let mut resolved = IndexMap::new();
+        for (name, schema) in schemas {
+            // let schema =
+            match schema {
+                ReferenceOr::Reference { reference } => {
+                    // TODO resolve
+                    let rf = Reference::parse(reference)?;
+                    let file = match rf.file {
+                        None => path.to_owned(),
+                        Some(file) => path_join(path, &file)?,
+                    };
+                    // let doc = self.docs.get(&path).ok_or_else(|| format!("doc for {}", &path))?;
+                    match rf.name {
+                        None => Err(format!("no name in reference {}", &reference)),
+                        Some(nm) => {
+                            let schema = self
+                                .schemas
+                                .get(&RefKey {
+                                    file,
+                                    name: nm.clone(),
+                                })
+                                .ok_or_else(|| format!("a"))?;
+                            resolved.insert(name.clone(), schema.clone());
+                            Ok(())
+                        }
+                    }?;
+                }
+                ReferenceOr::Item(schema) => {
+                    resolved.insert(name.clone(), schema.clone());
+                }
+            }
+            // TODO resolve .properties, .additional_properties, .all_of, .items
+        }
+        Ok(resolved)
+    }
+}
+
+pub fn resolved_schema_properties(schema: &Schema) -> IndexMap<String, Schema> {
+    let mut resolved = IndexMap::new();
+    for (name, schema) in &schema.properties {
+        match schema {
+            ReferenceOr::Reference { reference: _ } => {}
+            ReferenceOr::Item(schema) => {
+                resolved.insert(name.clone(), *schema.clone());
+            }
+        }
+    }
+    resolved
+}
+
+pub fn resolved_schema_additonal_properties(schema: &Schema) -> Option<Schema> {
+    match &schema.additional_properties {
+        Some(ReferenceOr::Reference { reference: _ }) => None,
+        Some(ReferenceOr::Item(schema)) => Some(*schema.clone()),
+        None => None,
+    }
+}
+
+pub fn resolved_schema_items(items: &Option<ReferenceOr<Box<Schema>>>) -> Option<Schema> {
+    match items {
+        Some(ReferenceOr::Reference { reference: _ }) => None,
+        Some(ReferenceOr::Item(schema)) => Some(*schema.clone()),
+        None => None,
+    }
+}
+
+pub fn resolved_schema_all_of(all_of: Vec<ReferenceOr<Box<Schema>>>) -> Vec<Schema> {
+    let mut resolved = Vec::new();
+    for s in all_of {
+        match s {
+            ReferenceOr::Reference { reference: _ } => {}
+            ReferenceOr::Item(schema) => {
+                resolved.push(*schema.clone());
+            }
+        }
+    }
+    resolved
 }
 
 pub fn read_api_file(path: &str) -> Result<OpenAPI> {

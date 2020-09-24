@@ -1,5 +1,5 @@
 use autorust_codegen::{
-    create_api_client, create_client, new_app, new_config, write_file, Result, Spec,
+    create_api_client, create_model, new_app, new_config, write_file, Result, Spec,
 };
 
 fn main() -> Result<()> {
@@ -12,11 +12,11 @@ fn main() -> Result<()> {
         // TODO may be combine into single file
 
         // create model from definitions
-        let model = create_client(spec);
+        let model = create_model(spec)?;
         write_file(&model, "model.rs");
 
         // create api client from operations
-        let client = create_api_client(spec);
+        let client = create_api_client(spec)?;
         write_file(&client, "client.rs");
     }
     Ok(())

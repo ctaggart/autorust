@@ -1,23 +1,23 @@
 #![allow(unused_variables, dead_code)]
-use crate::{format_code, Spec};
+use crate::{format_code, resolved_schema_items, resolved_schema_properties, Result, Spec};
 use autorust_openapi::{DataType, Operation, Parameter, Schema};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
-use std::{fs::File, io::prelude::*};
+use std::{collections::HashSet, fs::File, io::prelude::*};
 
-pub fn create_client(spec: &Spec) -> TokenStream {
-    // let mut tokens = TokenStream::new();
-    // let definitions = &spec.definitions;
-    // definitions.iter().for_each(|(name, definition)| {
-    //     for stream in create_struct(name, definition) {
-    //         tokens.extend(stream);
-    //     }
-    // });
-    // tokens
-    quote! {} // TODO
+pub fn create_model(spec: &Spec) -> Result<TokenStream> {
+    let mut tokens = TokenStream::new();
+    let (root_path, root_doc) = spec.docs.get_index(0).unwrap();
+    let schemas = &spec.resolve_schemas(root_path, &root_doc.definitions)?;
+    schemas.iter().for_each(|(name, schema)| {
+        for stream in create_struct(name, schema) {
+            tokens.extend(stream);
+        }
+    });
+    Ok(tokens)
 }
 
 fn is_keyword(word: &str) -> bool {
@@ -74,7 +74,7 @@ fn to_rust_type(
     items: Option<&Schema>,
     _schema_format: Option<&str>, // TODO
     required: bool,
-    enum_values: Option<Vec<&str>>,
+    enum_values: Vec<&str>,
     property_name: &str,
     struct_name: &str,
 ) -> (TokenStream, Option<TokenStream>) {
@@ -89,7 +89,7 @@ fn to_rust_type(
             let id = ident(&ref_uri.to_camel_case());
             TokenStream::from(quote! {#id})
         }
-    } else if let Some(enum_values) = enum_values {
+    } else if enum_values.len() > 0 {
         enum_ts = Some(create_enum(struct_name, property_name, enum_values));
         let ns = ident(&struct_name.to_snake_case());
         let id = ident(&property_name.to_camel_case());
@@ -101,6 +101,7 @@ fn to_rust_type(
         if let Some(schema_type) = schema_type {
             match schema_type {
                 DataType::Array => {
+                    // println!("struct_name: {:#?}", struct_name);
                     // println!("array items: {:#?}", items);
                     let items = items.expect("array to have item schema");
                     // let item = items.pop().expect("items to not be 0");
@@ -128,71 +129,74 @@ fn ident(word: &str) -> Ident {
     }
 }
 
-// fn create_struct(struct_name: &str, definition: &Schema) -> Vec<TokenStream> {
-//     let mut streams = vec![];
-//     let mut props = TokenStream::new();
-//     let nm = ident(&struct_name.to_camel_case());
-//     // println!("definition {:#?}", definition);
-//     let required: HashSet<String> = definition.required.into_iter().collect();
+fn create_struct(struct_name: &str, schema: &Schema) -> Vec<TokenStream> {
+    let mut streams = vec![];
+    let mut props = TokenStream::new();
+    let nm = ident(&struct_name.to_camel_case());
+    // println!("definition {:#?}", definition);
+    // let required: HashSet<String> = schema.required.into_iter().collect();
+    let required: HashSet<&str> = schema.required.iter().map(String::as_str).collect();
 
-//     definition.properties.iter().for_each(|(name, property)| {
-//         let nm = ident(&name.to_snake_case());
-//         // println!("property {:#?}", property);
-//         // println!("enum_ {:#?}", property.enum_);
-//         let is_required = required.contains(name);
+    let properties = resolved_schema_properties(&schema);
+    // schema.properties.iter().for_each(|(name, property)| {
+    properties.iter().for_each(|(name, property)| {
+        let nm = ident(&name.to_snake_case());
+        // println!("property {:#?}", property);
+        // println!("enum_ {:#?}", property.enum_);
+        let is_required = required.contains(name.as_str());
 
-//         let items: Option<&Schema> = property.items.as_ref().map(Box::as_ref);
+        // let items: Option<&Schema> = property.items.as_ref().map(Box::as_ref);
+        let items = resolved_schema_items(&property.items);
+        let enum_values: Vec<&str> = property.enum_.iter().map(String::as_str).collect();
 
-//         let (tp, inner_tp) = to_rust_type(
-//             property.ref_.as_ref().map(String::as_ref),
-//             property.type_.as_ref(),
-//             items,
-//             property.format.as_ref().map(String::as_ref),
-//             is_required,
-//             property
-//                 .enum_
-//                 .as_ref()
-//                 .map(|v| v.iter().map(String::as_ref).collect()),
-//             name,
-//             struct_name,
-//         );
-//         if let Some(inner_tp) = inner_tp {
-//             streams.push(inner_tp);
-//         }
-//         let skip_serialization_if = if is_required {
-//             quote! {}
-//         } else {
-//             quote! {skip_serializing_if = "Option::is_none"}
-//         };
-//         let rename = if &nm.to_string() == name {
-//             if is_required {
-//                 quote! {}
-//             } else {
-//                 quote! {#[serde(#skip_serialization_if)]}
-//             }
-//         } else {
-//             if is_required {
-//                 quote! {#[serde(rename = #name)]}
-//             } else {
-//                 quote! {#[serde(rename = #name, #skip_serialization_if)]}
-//             }
-//         };
-//         let prop = quote! {
-//             #rename
-//             #nm: #tp,
-//         };
-//         props.extend(prop);
-//     });
+        let (tp, inner_tp) = to_rust_type(
+            // property.ref_.as_ref().map(String::as_ref),
+            None,
+            property.type_.as_ref(),
+            items.as_ref(),
+            property.format.as_ref().map(String::as_ref),
+            is_required,
+            enum_values,
+            name,
+            struct_name,
+        );
+        if let Some(inner_tp) = inner_tp {
+            streams.push(inner_tp);
+        }
+        let skip_serialization_if = if is_required {
+            quote! {}
+        } else {
+            quote! {skip_serializing_if = "Option::is_none"}
+        };
+        let rename = if &nm.to_string() == name {
+            if is_required {
+                quote! {}
+            } else {
+                quote! {#[serde(#skip_serialization_if)]}
+            }
+        } else {
+            if is_required {
+                quote! {#[serde(rename = #name)]}
+            } else {
+                quote! {#[serde(rename = #name, #skip_serialization_if)]}
+            }
+        };
+        let prop = quote! {
+            #rename
+            #nm: #tp,
+        };
+        props.extend(prop);
+    });
 
-//     let st = quote! {
-//         #[derive(Debug, PartialEq, Serialize, Deserialize)]
-//         pub struct #nm {
-//             #props
-//         }
-//     };
-//     streams.push(TokenStream::from(st));
-//     streams
-// }
+    let st = quote! {
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        pub struct #nm {
+            #props
+        }
+    };
+    streams.push(TokenStream::from(st));
+    streams
+}
 
 pub fn write_file(tokens: &TokenStream, path: &str) {
     let code = format_code(tokens.to_string());
@@ -407,7 +411,7 @@ impl<'a> RefParam<'a> {
     }
 }
 
-pub fn create_api_client(spec: &Spec) -> TokenStream {
+pub fn create_api_client(spec: &Spec) -> Result<TokenStream> {
     // let mut file = TokenStream::new();
     // let param_re = Regex::new(r"\{(\w+)\}").unwrap();
     // let ref_param = RefParam {
@@ -422,5 +426,5 @@ pub fn create_api_client(spec: &Spec) -> TokenStream {
     //     }
     // }
     // file
-    quote! {} // TODO
+    Ok(quote! {}) // TODO
 }

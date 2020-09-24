@@ -40,3 +40,23 @@ fn read_spec_avs() -> Result<()> {
     ));
     Ok(())
 }
+
+#[test]
+fn test_resolve_schema_ref() -> Result<()> {
+    let file = "../azure-rest-api-specs/specification/vmware/resource-manager/Microsoft.AVS/stable/2020-03-20/vmware.json";
+    let spec = &Spec::read_file(file)?;
+    spec.resolve_schema_ref(file, "#/definitions/OperationList")?;
+    spec.resolve_schema_ref(
+        file,
+        "../../../../../common-types/resource-management/v1/types.json#/definitions/ErrorResponse",
+    )?;
+    Ok(())
+}
+
+#[test]
+fn test_resolve_parameter_ref() -> Result<()> {
+    let file = "../azure-rest-api-specs/specification/vmware/resource-manager/Microsoft.AVS/stable/2020-03-20/vmware.json";
+    let spec = &Spec::read_file(file)?;
+    spec.resolve_parameter_ref(file, "../../../../../common-types/resource-management/v1/types.json#/parameters/ApiVersionParameter")?;
+    Ok(())
+}
