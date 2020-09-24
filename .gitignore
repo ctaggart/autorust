@@ -3,6 +3,6 @@
 _git2*
 b.rs
 *.txt
-client.rs
-model.rs
+client*.rs
+model*.rs
 generated

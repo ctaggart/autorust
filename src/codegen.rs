@@ -74,8 +74,7 @@ fn create_enum(struct_name: &str, property_name: &str, enum_values: Vec<&str>) -
 
 // type: "string", "array", "integer"
 // format: "uuid", "date-time", "i32"
-fn to_rust_type(
-    ref_uri: Option<&str>,
+fn create_struct_field_type(
     schema_type: Option<&DataType>,
     items: Option<&Schema>,
     _schema_format: Option<&str>, // TODO
@@ -87,15 +86,8 @@ fn to_rust_type(
     // , enums: Option<Vec<&str>>
     // println!("to_rust_type {:?} {:?} {:?}", ref_path, schema_type, schema_format)
     let mut enum_ts: Option<TokenStream> = None;
-    let tp = if let Some(ref_uri) = ref_uri {
-        if let Some(i) = ref_uri.rfind('/') {
-            let id = ident(&ref_uri[i + 1..].to_camel_case());
-            TokenStream::from(quote! {#id})
-        } else {
-            let id = ident(&ref_uri.to_camel_case());
-            TokenStream::from(quote! {#id})
-        }
-    } else if enum_values.len() > 0 {
+
+    let tp = if enum_values.len() > 0 {
         enum_ts = Some(create_enum(struct_name, property_name, enum_values));
         let ns = ident(&struct_name.to_snake_case());
         let id = ident(&property_name.to_camel_case());
@@ -120,6 +112,10 @@ fn to_rust_type(
                     let vec_items_typ = get_type_for_schema(&items);
                     quote! {Vec<#vec_items_typ>}
                 }
+                DataType::Integer => quote! {i32},
+                DataType::Number => quote! {f64},
+                DataType::String => quote! {String},
+                DataType::Boolean => quote! {bool},
                 _ => unknown_type,
             }
         } else {
@@ -169,9 +165,7 @@ fn create_struct(
 
         let enum_values: Vec<&str> = property.enum_.iter().map(String::as_str).collect();
 
-        let (tp, inner_tp) = to_rust_type(
-            // property.ref_.as_ref().map(String::as_ref),
-            None,
+        let (tp, inner_tp) = create_struct_field_type(
             property.type_.as_ref(),
             items.as_ref(),
             property.format.as_ref().map(String::as_ref),
