@@ -1,22 +1,28 @@
 #![allow(unused_variables, dead_code)]
-use crate::{format_code, resolved_schema_items, resolved_schema_properties, Result, Spec};
-use autorust_openapi::{DataType, Operation, Parameter, Schema};
+use crate::{format_code, pathitem_operations, Result, Spec};
+use autorust_openapi::{DataType, Operation, Schema};
 use heck::{CamelCase, SnakeCase};
-use indexmap::IndexMap;
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
 use regex::Regex;
 use std::{collections::HashSet, fs::File, io::prelude::*};
 
-pub fn create_model(spec: &Spec) -> Result<TokenStream> {
+/// code generation context
+pub struct CodeGen {
+    pub spec: Spec,
+}
+
+pub fn create_model(cg: &CodeGen) -> Result<TokenStream> {
     let mut tokens = TokenStream::new();
-    let (root_path, root_doc) = spec.docs.get_index(0).unwrap();
-    let schemas = &spec.resolve_schemas(root_path, &root_doc.definitions)?;
-    schemas.iter().for_each(|(name, schema)| {
-        for stream in create_struct(name, schema) {
+    let (root_path, root_doc) = cg.spec.docs.get_index(0).unwrap();
+    let schemas = &cg
+        .spec
+        .resolve_schema_map(root_path, &root_doc.definitions)?;
+    for (name, schema) in schemas {
+        for stream in create_struct(cg, root_path, name, schema)? {
             tokens.extend(stream);
         }
-    });
+    }
     Ok(tokens)
 }
 
@@ -77,7 +83,7 @@ fn to_rust_type(
     enum_values: Vec<&str>,
     property_name: &str,
     struct_name: &str,
-) -> (TokenStream, Option<TokenStream>) {
+) -> Result<(TokenStream, Option<TokenStream>)> {
     // , enums: Option<Vec<&str>>
     // println!("to_rust_type {:?} {:?} {:?}", ref_path, schema_type, schema_format)
     let mut enum_ts: Option<TokenStream> = None;
@@ -103,7 +109,13 @@ fn to_rust_type(
                 DataType::Array => {
                     // println!("struct_name: {:#?}", struct_name);
                     // println!("array items: {:#?}", items);
-                    let items = items.expect("array to have item schema");
+                    // let items = items.expect("array to have item schema");
+                    let items = items.ok_or_else(|| {
+                        format!(
+                            "array expected to have items, struct {}, property {}",
+                            struct_name, property_name
+                        )
+                    })?;
                     // let item = items.pop().expect("items to not be 0");
                     let vec_items_typ = get_type_for_schema(&items);
                     quote! {Vec<#vec_items_typ>}
@@ -115,9 +127,9 @@ fn to_rust_type(
         }
     };
     if required {
-        (tp, enum_ts)
+        Ok((tp, enum_ts))
     } else {
-        (quote! {Option<#tp>}, enum_ts)
+        Ok((quote! {Option<#tp>}, enum_ts))
     }
 }
 
@@ -129,24 +141,32 @@ fn ident(word: &str) -> Ident {
     }
 }
 
-fn create_struct(struct_name: &str, schema: &Schema) -> Vec<TokenStream> {
+fn create_struct(
+    cg: &CodeGen,
+    doc_file: &str,
+    struct_name: &str,
+    schema: &Schema,
+) -> Result<Vec<TokenStream>> {
     let mut streams = vec![];
     let mut props = TokenStream::new();
     let nm = ident(&struct_name.to_camel_case());
     // println!("definition {:#?}", definition);
-    // let required: HashSet<String> = schema.required.into_iter().collect();
     let required: HashSet<&str> = schema.required.iter().map(String::as_str).collect();
 
-    let properties = resolved_schema_properties(&schema);
-    // schema.properties.iter().for_each(|(name, property)| {
-    properties.iter().for_each(|(name, property)| {
+    let properties = cg
+        .spec
+        .resolve_box_schema_map(doc_file, &schema.properties)?;
+    for (name, property) in &properties {
         let nm = ident(&name.to_snake_case());
         // println!("property {:#?}", property);
         // println!("enum_ {:#?}", property.enum_);
         let is_required = required.contains(name.as_str());
 
-        // let items: Option<&Schema> = property.items.as_ref().map(Box::as_ref);
-        let items = resolved_schema_items(&property.items);
+        let items = match &property.items {
+            None => None,
+            Some(items) => Some(cg.spec.resolve_box_schema(doc_file, items)?),
+        };
+
         let enum_values: Vec<&str> = property.enum_.iter().map(String::as_str).collect();
 
         let (tp, inner_tp) = to_rust_type(
@@ -159,7 +179,7 @@ fn create_struct(struct_name: &str, schema: &Schema) -> Vec<TokenStream> {
             enum_values,
             name,
             struct_name,
-        );
+        )?;
         if let Some(inner_tp) = inner_tp {
             streams.push(inner_tp);
         }
@@ -186,7 +206,7 @@ fn create_struct(struct_name: &str, schema: &Schema) -> Vec<TokenStream> {
             #nm: #tp,
         };
         props.extend(prop);
-    });
+    }
 
     let st = quote! {
         #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -195,7 +215,7 @@ fn create_struct(struct_name: &str, schema: &Schema) -> Vec<TokenStream> {
         }
     };
     streams.push(TokenStream::from(st));
-    streams
+    Ok(streams)
 }
 
 pub fn write_file(tokens: &TokenStream, path: &str) {
@@ -208,20 +228,6 @@ fn trim_ref(path: &str) -> String {
     let pos = path.rfind('/').map_or(0, |i| i + 1);
     path[pos..].to_string()
 }
-
-// fn get_param_name<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> String {
-//     match param {
-//         ParameterOrRef::Parameter(Parameter { name, .. }) => name.to_string(),
-//         ParameterOrRef::Ref(Reference { ref_ }) => {
-//             // println!("get_param_name refpath {}", ref_);
-//             if let Some(param) = ref_param.ref_param(ref_) {
-//                 param.name.to_string()
-//             } else {
-//                 "ref_param_not_found".to_owned()
-//             }
-//         }
-//     }
-// }
 
 // simple types in the url
 fn map_type(param_type: &str) -> TokenStream {
@@ -292,7 +298,7 @@ fn format_path(param_re: &Regex, path: &str) -> String {
     param_re.replace_all(path, "{}").to_string()
 }
 
-fn create_function_params<'a>(op: &Operation, ref_param: &'a RefParam) -> TokenStream {
+fn create_function_params<'a>(cg: &CodeGen, op: &Operation) -> TokenStream {
     // let mut params: Vec<TokenStream> =
     //     op.parameters
     //         .iter()
@@ -323,7 +329,7 @@ fn get_type_for_schema(schema: &Schema) -> TokenStream {
 }
 
 // TODO is _ref_param not needed for a return
-fn create_function_return<'a>(op: &Operation, _ref_param: &'a RefParam) -> TokenStream {
+fn create_function_return(op: &Operation) -> TokenStream {
     // TODO error responses
     // TODO union of respones
     // for (_http_code, rsp) in op.responses.iter() {
@@ -336,12 +342,7 @@ fn create_function_return<'a>(op: &Operation, _ref_param: &'a RefParam) -> Token
     quote! { Result<()> }
 }
 
-fn create_function<'a>(
-    path: &str,
-    op: &Operation,
-    param_re: &Regex,
-    ref_param: &'a RefParam,
-) -> TokenStream {
+fn create_function(cg: &CodeGen, path: &str, op: &Operation, param_re: &Regex) -> TokenStream {
     let name_default = "operation_id_missing";
     let name = ident(
         op.operation_id
@@ -372,11 +373,11 @@ fn create_function<'a>(
 
     // get path parameters
     // Option if not required
-    let fparams = create_function_params(op, ref_param);
+    let fparams = create_function_params(cg, op);
 
     // see if there is a body parameter
     // print_responses(&op);
-    let fresponse = create_function_return(op, ref_param);
+    let fresponse = create_function_return(op);
 
     let func = quote! {
         pub async fn #name(#fparams) -> #fresponse {
@@ -401,30 +402,17 @@ fn create_function<'a>(
     TokenStream::from(func)
 }
 
-struct RefParam<'a> {
-    parameters: &'a IndexMap<String, Parameter>,
-}
-
-impl<'a> RefParam<'a> {
-    fn ref_param(&self, rf: &str) -> Option<&'a Parameter> {
-        self.parameters.get(&trim_ref(rf))
+pub fn create_client(cg: &CodeGen) -> Result<TokenStream> {
+    let mut file = TokenStream::new();
+    let param_re = Regex::new(r"\{(\w+)\}").unwrap();
+    let (doc_file, doc) = cg.spec.root();
+    let paths = cg.spec.resolve_path_map(doc_file, &doc.paths)?;
+    for (path, item) in &paths {
+        // println!("{}", path);
+        for op in pathitem_operations(item) {
+            // println!("{:?}", op.operation_id);
+            file.extend(create_function(cg, &path, &op, &param_re))
+        }
     }
-}
-
-pub fn create_api_client(spec: &Spec) -> Result<TokenStream> {
-    // let mut file = TokenStream::new();
-    // let param_re = Regex::new(r"\{(\w+)\}").unwrap();
-    // let ref_param = RefParam {
-    //     parameters: &spec.parameters,
-    // };
-
-    // for (path, item) in &spec.paths {
-    //     // println!("{}", path);
-    //     for op in pathitem_operations(item) {
-    //         // println!("{:?}", op.operation_id);
-    //         file.extend(create_function(&path, &op, &param_re, &ref_param))
-    //     }
-    // }
-    // file
-    Ok(quote! {}) // TODO
+    Ok(file)
 }

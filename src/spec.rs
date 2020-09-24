@@ -19,6 +19,19 @@ struct RefKey {
 }
 
 impl Spec {
+    pub fn root(&self) -> (&str, &OpenAPI) {
+        let (file, doc) = self.docs.get_index(0).unwrap();
+        (file, doc)
+    }
+    pub fn root_file(&self) -> &str {
+        let (file, _doc) = self.root();
+        file
+    }
+    pub fn root_doc(&self) -> &OpenAPI {
+        let (_file, doc) = self.root();
+        doc
+    }
+
     pub fn read_file(path: &str) -> Result<Self> {
         let mut docs = IndexMap::new();
         let root = read_api_file(path)?;
@@ -112,88 +125,86 @@ impl Spec {
         }
     }
 
-    pub fn resolve_schemas(
+    pub fn resolve_box_schema(
         &self,
-        path: &str,
+        doc_file: &str,
+        schema: &ReferenceOr<Box<Schema>>,
+    ) -> Result<Schema> {
+        match schema {
+            ReferenceOr::Item(schema) => Ok(*schema.clone()),
+            ReferenceOr::Reference { reference } => self.resolve_schema_ref(doc_file, reference),
+        }
+    }
+
+    pub fn resolve_schema_map(
+        &self,
+        doc_file: &str,
         schemas: &IndexMap<String, ReferenceOr<Schema>>,
     ) -> Result<IndexMap<String, Schema>> {
         let mut resolved = IndexMap::new();
         for (name, schema) in schemas {
-            // let schema =
-            match schema {
-                ReferenceOr::Reference { reference } => {
-                    // TODO resolve
-                    let rf = Reference::parse(reference)?;
-                    let file = match rf.file {
-                        None => path.to_owned(),
-                        Some(file) => path_join(path, &file)?,
-                    };
-                    // let doc = self.docs.get(&path).ok_or_else(|| format!("doc for {}", &path))?;
-                    match rf.name {
-                        None => Err(format!("no name in reference {}", &reference)),
-                        Some(nm) => {
-                            let schema = self
-                                .schemas
-                                .get(&RefKey {
-                                    file,
-                                    name: nm.clone(),
-                                })
-                                .ok_or_else(|| format!("a"))?;
-                            resolved.insert(name.clone(), schema.clone());
-                            Ok(())
-                        }
-                    }?;
-                }
-                ReferenceOr::Item(schema) => {
-                    resolved.insert(name.clone(), schema.clone());
-                }
-            }
-            // TODO resolve .properties, .additional_properties, .all_of, .items
+            resolved.insert(name.clone(), self.resolve_schema(doc_file, schema)?);
         }
         Ok(resolved)
     }
-}
 
-pub fn resolved_schema_properties(schema: &Schema) -> IndexMap<String, Schema> {
-    let mut resolved = IndexMap::new();
-    for (name, schema) in &schema.properties {
+    pub fn resolve_box_schema_map(
+        &self,
+        doc_file: &str,
+        schemas: &IndexMap<String, ReferenceOr<Box<Schema>>>,
+    ) -> Result<IndexMap<String, Schema>> {
+        let mut resolved = IndexMap::new();
+        for (name, schema) in schemas {
+            resolved.insert(name.clone(), self.resolve_box_schema(doc_file, schema)?);
+        }
+        Ok(resolved)
+    }
+
+    pub fn resolve_box_schemas(
+        &self,
+        doc_file: &str,
+        all_of: Vec<ReferenceOr<Box<Schema>>>,
+    ) -> Result<Vec<Schema>> {
+        let mut resolved = Vec::new();
+        for schema in all_of {
+            resolved.push(self.resolve_box_schema(doc_file, &schema)?);
+        }
+        Ok(resolved)
+    }
+
+    pub fn resolve_path(&self, _doc_file: &str, path: &ReferenceOr<PathItem>) -> Result<PathItem> {
+        match path {
+            ReferenceOr::Item(path) => Ok(path.clone()),
+            ReferenceOr::Reference { reference: _ } =>
+            // self.resolve_path_ref(doc_file, reference),
+            {
+                Err("path references not implemented")?
+            } // TODO
+        }
+    }
+
+    pub fn resolve_path_map(
+        &self,
+        doc_file: &str,
+        paths: &IndexMap<String, ReferenceOr<PathItem>>,
+    ) -> Result<IndexMap<String, PathItem>> {
+        let mut resolved = IndexMap::new();
+        for (name, path) in paths {
+            resolved.insert(name.clone(), self.resolve_path(doc_file, path)?);
+        }
+        Ok(resolved)
+    }
+
+    pub fn resolve_parameter(
+        &self,
+        doc_file: &str,
+        schema: &ReferenceOr<Parameter>,
+    ) -> Result<Parameter> {
         match schema {
-            ReferenceOr::Reference { reference: _ } => {}
-            ReferenceOr::Item(schema) => {
-                resolved.insert(name.clone(), *schema.clone());
-            }
+            ReferenceOr::Item(param) => Ok(param.clone()),
+            ReferenceOr::Reference { reference } => self.resolve_parameter_ref(doc_file, reference),
         }
     }
-    resolved
-}
-
-pub fn resolved_schema_additonal_properties(schema: &Schema) -> Option<Schema> {
-    match &schema.additional_properties {
-        Some(ReferenceOr::Reference { reference: _ }) => None,
-        Some(ReferenceOr::Item(schema)) => Some(*schema.clone()),
-        None => None,
-    }
-}
-
-pub fn resolved_schema_items(items: &Option<ReferenceOr<Box<Schema>>>) -> Option<Schema> {
-    match items {
-        Some(ReferenceOr::Reference { reference: _ }) => None,
-        Some(ReferenceOr::Item(schema)) => Some(*schema.clone()),
-        None => None,
-    }
-}
-
-pub fn resolved_schema_all_of(all_of: Vec<ReferenceOr<Box<Schema>>>) -> Vec<Schema> {
-    let mut resolved = Vec::new();
-    for s in all_of {
-        match s {
-            ReferenceOr::Reference { reference: _ } => {}
-            ReferenceOr::Item(schema) => {
-                resolved.push(*schema.clone());
-            }
-        }
-    }
-    resolved
 }
 
 pub fn read_api_file(path: &str) -> Result<OpenAPI> {

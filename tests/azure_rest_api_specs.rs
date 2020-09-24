@@ -60,3 +60,23 @@ fn test_resolve_parameter_ref() -> Result<()> {
     spec.resolve_parameter_ref(file, "../../../../../common-types/resource-management/v1/types.json#/parameters/ApiVersionParameter")?;
     Ok(())
 }
+
+#[test]
+fn test_resolve_all_refs() -> Result<()> {
+    let doc_file = "../azure-rest-api-specs/specification/vmware/resource-manager/Microsoft.AVS/stable/2020-03-20/vmware.json";
+    let spec = &Spec::read_file(doc_file)?;
+    let refs = get_refs(spec.root_doc());
+    for rs in refs {
+        match rs {
+            RefString::PathItem(_) => {}
+            RefString::Example(_) => {}
+            RefString::Parameter(reference) => {
+                spec.resolve_parameter_ref(doc_file, &reference)?;
+            }
+            RefString::Schema(reference) => {
+                spec.resolve_schema_ref(doc_file, &reference)?;
+            }
+        }
+    }
+    Ok(())
+}
