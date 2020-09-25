@@ -278,17 +278,17 @@ fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
 }
 
 // TODO is _ref_param not needed for a return
-fn create_function_return(op: &Operation) -> TokenStream {
+fn create_function_return(op: &Operation) -> Result<TokenStream> {
     // TODO error responses
-    // TODO union of respones
-    // for (_http_code, rsp) in op.responses.iter() {
-    //     // println!("response key {:#?} {:#?}", key, rsp);
-    //     if let Some(schema) = &rsp.schema {
-    //         let tp = get_type_for_schema(schema);
-    //         return quote! { Result<#tp> };
-    //     }
-    // }
-    quote! { Result<()> }
+    // TODO union of responses
+    for (_http_code, rsp) in op.responses.iter() {
+        // println!("response key {:#?} {:#?}", key, rsp);
+        if let Some(schema) = &rsp.schema {
+            let tp = get_type_for_schema(schema)?;
+            return Ok(quote! { Result<#tp> });
+        }
+    }
+    Ok(quote! { Result<()> })
 }
 
 fn create_function(
@@ -317,7 +317,7 @@ fn create_function(
     let fparams = create_function_params(cg, op)?;
 
     // see if there is a body parameter
-    let fresponse = create_function_return(op);
+    let fresponse = create_function_return(op)?;
 
     let func = quote! {
         pub async fn #name(#fparams) -> #fresponse {
