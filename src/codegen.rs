@@ -1,6 +1,6 @@
 #![allow(unused_variables, dead_code)]
-use crate::{format_code, pathitem_operations, Result, Spec};
-use autorust_openapi::{DataType, Operation, Parameter, Schema};
+use crate::{format_code, pathitem_operations, Reference, Result, Spec};
+use autorust_openapi::{DataType, Operation, Parameter, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
@@ -76,40 +76,31 @@ fn create_enum(struct_name: &str, property_name: &str, enum_values: Vec<&str>) -
 // format: "uuid", "date-time", "i32"
 fn create_struct_field_type(
     schema_type: Option<&DataType>,
-    items: Option<&Schema>,
+    items: &Option<ReferenceOr<Schema>>,
     _schema_format: Option<&str>, // TODO
     required: bool,
     enum_values: Vec<&str>,
     property_name: &str,
     struct_name: &str,
 ) -> Result<(TokenStream, Option<TokenStream>)> {
-    // , enums: Option<Vec<&str>>
-    // println!("to_rust_type {:?} {:?} {:?}", ref_path, schema_type, schema_format)
     let mut enum_ts: Option<TokenStream> = None;
-
     let tp = if enum_values.len() > 0 {
         enum_ts = Some(create_enum(struct_name, property_name, enum_values));
         let ns = ident(&struct_name.to_snake_case());
         let id = ident(&property_name.to_camel_case());
         TokenStream::from(quote! {#ns::#id})
     } else {
-        // TODO array, integer
         let unknown_type = quote!(UnknownType);
-
         if let Some(schema_type) = schema_type {
             match schema_type {
                 DataType::Array => {
-                    // println!("struct_name: {:#?}", struct_name);
-                    // println!("array items: {:#?}", items);
-                    // let items = items.expect("array to have item schema");
-                    let items = items.ok_or_else(|| {
+                    let items = items.as_ref().ok_or_else(|| {
                         format!(
                             "array expected to have items, struct {}, property {}",
                             struct_name, property_name
                         )
                     })?;
-                    // let item = items.pop().expect("items to not be 0");
-                    let vec_items_typ = get_type_for_schema(&items);
+                    let vec_items_typ = get_type_for_schema(&items)?;
                     quote! {Vec<#vec_items_typ>}
                 }
                 DataType::Integer => quote! {i32},
@@ -146,28 +137,17 @@ fn create_struct(
     let mut streams = vec![];
     let mut props = TokenStream::new();
     let nm = ident(&struct_name.to_camel_case());
-    // println!("definition {:#?}", definition);
     let required: HashSet<&str> = schema.required.iter().map(String::as_str).collect();
 
-    let properties = cg
-        .spec
-        .resolve_box_schema_map(doc_file, &schema.properties)?;
+    let properties = cg.spec.resolve_schema_map(doc_file, &schema.properties)?;
     for (name, property) in &properties {
         let nm = ident(&name.to_snake_case());
-        // println!("property {:#?}", property);
-        // println!("enum_ {:#?}", property.enum_);
         let is_required = required.contains(name.as_str());
-
-        let items = match &property.items {
-            None => None,
-            Some(items) => Some(cg.spec.resolve_box_schema(doc_file, items)?),
-        };
-
         let enum_values: Vec<&str> = property.enum_.iter().map(String::as_str).collect();
 
         let (tp, inner_tp) = create_struct_field_type(
             property.type_.as_ref(),
-            items.as_ref(),
+            &property.items,
             property.format.as_ref().map(String::as_ref),
             is_required,
             enum_values,
@@ -229,30 +209,27 @@ fn map_type(param_type: &DataType) -> TokenStream {
         DataType::String => quote! { &str },
         DataType::Integer => quote! { i32 },
         _ => {
-            // let idt = ident(param_type);
-            // quote! { #idt }
-            quote! {map_type}
+            quote! {map_type} // TODO may be Err instead
         }
     }
 }
 
-fn get_param_type<'a>(param: &Parameter) -> TokenStream {
-    // let required = required.map_or(false);
+fn get_param_type(param: &Parameter) -> Result<TokenStream> {
+    // let required = required.map_or(false); // TODO
     if let Some(param_type) = &param.type_ {
-        map_type(param_type)
-    // } else if let Some(schema) = param.schema { // TODO
-    //     let tp = get_type_for_schema(schema);
-    //     quote! { &#tp }
+        Ok(map_type(param_type))
+    } else if let Some(schema) = &param.schema {
+        Ok(get_type_for_schema(schema)?)
     } else {
         let idt = ident("NoParamType1");
-        quote! { #idt }
+        Ok(quote! { #idt }) // TOOD may be Err instead
     }
 }
 
-fn get_param_name_and_type(param: &Parameter) -> TokenStream {
+fn get_param_name_and_type(param: &Parameter) -> Result<TokenStream> {
     let name = ident(&param.name.to_snake_case());
-    let typ = get_param_type(param);
-    quote! { #name: #typ }
+    let typ = get_param_type(param)?;
+    Ok(quote! { #name: #typ })
 }
 
 fn parse_params(param_re: &Regex, path: &str) -> Vec<String> {
@@ -271,29 +248,33 @@ fn format_path(param_re: &Regex, path: &str) -> String {
 
 fn create_function_params(cg: &CodeGen, op: &Operation) -> Result<TokenStream> {
     let doc_file = cg.spec.root_file(); // TODO pass in
-    let params: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &op.parameters)?;
-    let mut params: Vec<TokenStream> = params.iter().map(|p| get_param_name_and_type(p)).collect();
-
+    let parameters: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &op.parameters)?;
+    let mut params: Vec<TokenStream> = Vec::new();
+    for param in &parameters {
+        params.push(get_param_name_and_type(param)?);
+    }
     let slf = quote! { &self };
     params.insert(0, slf);
     Ok(quote! { #(#params),* })
 }
 
-fn get_type_for_schema(schema: &Schema) -> TokenStream {
-    // // TODO items, schema.enum_
-    // let items: Option<&Schema> = schema.items.as_ref().map(Box::as_ref);
-    // let (tp, _extra) = to_rust_type(
-    //     schema.ref_.as_deref(),
-    //     schema.type_.as_ref(),
-    //     items,
-    //     schema.format.as_deref(),
-    //     true,
-    //     None,
-    //     "PropName",
-    //     "StructName",
-    // );
-    // tp
-    quote! {} // TODO
+fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
+    match schema {
+        ReferenceOr::Reference { reference } => {
+            let rf = Reference::parse(&reference)?;
+            let idt = ident(
+                &rf.name
+                    .ok_or_else(|| format!("no name for ref {}", reference))?,
+            );
+            Ok(quote! { #idt })
+        }
+        ReferenceOr::Item(_) => {
+            // TODO probably need to create a struct
+            // and have a way to name it
+            let idt = ident("NoParamType2");
+            Ok(quote! { #idt })
+        }
+    }
 }
 
 // TODO is _ref_param not needed for a return
@@ -324,19 +305,6 @@ fn create_function(
             .unwrap_or(name_default),
     );
 
-    // println!("path {}", path);
-    // println!("params {:#?}", op.parameters);
-
-    // let param_names: Vec<String> = if let Some(params) = &op.parameters {
-    //     params
-    //         .iter()
-    //         .map(|p| get_param_name(p, ref_param))
-    //         .collect()
-    // } else {
-    //     vec![]
-    // };
-    // println!("param names {:#?}", param_names);
-
     let params = parse_params(param_re, path);
     // println!("path params {:#?}", params);
     let params: Vec<Ident> = params.iter().map(|s| ident(&s.to_snake_case())).collect();
@@ -349,7 +317,6 @@ fn create_function(
     let fparams = create_function_params(cg, op)?;
 
     // see if there is a body parameter
-    // print_responses(&op);
     let fresponse = create_function_return(op);
 
     let func = quote! {

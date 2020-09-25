@@ -125,17 +125,6 @@ impl Spec {
         }
     }
 
-    pub fn resolve_box_schema(
-        &self,
-        doc_file: &str,
-        schema: &ReferenceOr<Box<Schema>>,
-    ) -> Result<Schema> {
-        match schema {
-            ReferenceOr::Item(schema) => Ok(*schema.clone()),
-            ReferenceOr::Reference { reference } => self.resolve_schema_ref(doc_file, reference),
-        }
-    }
-
     pub fn resolve_schema_map(
         &self,
         doc_file: &str,
@@ -144,30 +133,6 @@ impl Spec {
         let mut resolved = IndexMap::new();
         for (name, schema) in schemas {
             resolved.insert(name.clone(), self.resolve_schema(doc_file, schema)?);
-        }
-        Ok(resolved)
-    }
-
-    pub fn resolve_box_schema_map(
-        &self,
-        doc_file: &str,
-        schemas: &IndexMap<String, ReferenceOr<Box<Schema>>>,
-    ) -> Result<IndexMap<String, Schema>> {
-        let mut resolved = IndexMap::new();
-        for (name, schema) in schemas {
-            resolved.insert(name.clone(), self.resolve_box_schema(doc_file, schema)?);
-        }
-        Ok(resolved)
-    }
-
-    pub fn resolve_box_schemas(
-        &self,
-        doc_file: &str,
-        schemas: &Vec<ReferenceOr<Box<Schema>>>,
-    ) -> Result<Vec<Schema>> {
-        let mut resolved = Vec::new();
-        for schema in schemas {
-            resolved.push(self.resolve_box_schema(doc_file, schema)?);
         }
         Ok(resolved)
     }
@@ -268,19 +233,23 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
             ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
         }
     }
-    match &schema.additional_properties {
-        Some(ReferenceOr::Reference { reference }) => {
-            list.push(RefString::Schema(reference.to_owned()))
-        }
-        Some(ReferenceOr::Item(schema)) => add_refs_for_schema(list, schema),
-        None => {}
+    match schema.additional_properties.as_ref() {
+        Some(schema) => match schema {
+            ReferenceOr::Reference { reference } => {
+                list.push(RefString::Schema(reference.to_owned()))
+            }
+            ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
+        },
+        _ => {}
     }
-    match &schema.items {
-        Some(ReferenceOr::Reference { reference }) => {
-            list.push(RefString::Schema(reference.to_owned()))
-        }
-        Some(ReferenceOr::Item(schema)) => add_refs_for_schema(list, schema),
-        None => {}
+    match schema.items.as_ref() {
+        Some(schema) => match schema {
+            ReferenceOr::Reference { reference } => {
+                list.push(RefString::Schema(reference.to_owned()))
+            }
+            ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
+        },
+        _ => {}
     }
     for schema in &schema.all_of {
         match schema {
