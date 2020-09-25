@@ -1,6 +1,6 @@
 #![allow(unused_variables, dead_code)]
 use crate::{format_code, pathitem_operations, Result, Spec};
-use autorust_openapi::{DataType, Operation, Schema};
+use autorust_openapi::{DataType, Operation, Parameter, Schema};
 use heck::{CamelCase, SnakeCase};
 use proc_macro2::{Ident, TokenStream};
 use quote::{format_ident, quote};
@@ -224,59 +224,36 @@ fn trim_ref(path: &str) -> String {
 }
 
 // simple types in the url
-fn map_type(param_type: &str) -> TokenStream {
+fn map_type(param_type: &DataType) -> TokenStream {
     match param_type {
-        "string" => quote! { &str },
-        "integer" => quote! { i32 },
+        DataType::String => quote! { &str },
+        DataType::Integer => quote! { i32 },
         _ => {
-            let idt = ident(param_type);
-            quote! { #idt }
+            // let idt = ident(param_type);
+            // quote! { #idt }
+            quote! {map_type}
         }
     }
 }
 
-// fn get_param_type<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> TokenStream {
-//     match param {
-//         ParameterOrRef::Parameter(Parameter {
-//             //required, // TODO
-//             type_,
-//             schema,
-//             ..
-//         }) => {
-//             // let required = required.map_or(false);
-//             // type_.as_ref().map_or("NoParamType".to_owned(), String::from)
-//             if let Some(param_type) = type_ {
-//                 map_type(param_type)
-//             } else if let Some(schema) = schema {
-//                 let tp = get_type_for_schema(schema);
-//                 quote! { &#tp }
-//             } else {
-//                 let idt = ident("NoParamType1");
-//                 quote! { #idt }
-//             }
-//         }
-//         ParameterOrRef::Ref(Reference { ref_ }) => {
-//             // println!("get_param_type refpath {}", ref_);
-//             if let Some(param) = ref_param.ref_param(ref_) {
-//                 if let Some(param_type) = &param.type_ {
-//                     map_type(param_type)
-//                 } else {
-//                     let idt = ident("NoParamType2");
-//                     quote! { #idt }
-//                 }
-//             } else {
-//                 let idt = ident("RefParamNotFound");
-//                 quote! { #idt }
-//             }
-//         }
-//     }
-// }
+fn get_param_type<'a>(param: &Parameter) -> TokenStream {
+    // let required = required.map_or(false);
+    if let Some(param_type) = &param.type_ {
+        map_type(param_type)
+    // } else if let Some(schema) = param.schema { // TODO
+    //     let tp = get_type_for_schema(schema);
+    //     quote! { &#tp }
+    } else {
+        let idt = ident("NoParamType1");
+        quote! { #idt }
+    }
+}
 
-// fn get_param_name_and_type<'a>(param: &ParameterOrRef, ref_param: &'a RefParam) -> TokenStream {
-//     let name = ident(&get_param_name(param, ref_param).to_snake_case());
-//     let typ = get_param_type(param, ref_param);
-//     quote! { #name: #typ }
-// }
+fn get_param_name_and_type(param: &Parameter) -> TokenStream {
+    let name = ident(&param.name.to_snake_case());
+    let typ = get_param_type(param);
+    quote! { #name: #typ }
+}
 
 fn parse_params(param_re: &Regex, path: &str) -> Vec<String> {
     // capture 0 is the whole match and 1 is the actual capture like other languages
@@ -292,17 +269,14 @@ fn format_path(param_re: &Regex, path: &str) -> String {
     param_re.replace_all(path, "{}").to_string()
 }
 
-fn create_function_params<'a>(cg: &CodeGen, op: &Operation) -> TokenStream {
-    // let mut params: Vec<TokenStream> =
-    //     op.parameters
-    //         .iter()
-    //         .map(|p| get_param_name_and_type(p, ref_param))
-    //         .collect();
+fn create_function_params(cg: &CodeGen, op: &Operation) -> Result<TokenStream> {
+    let doc_file = cg.spec.root_file(); // TODO pass in
+    let params: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &op.parameters)?;
+    let mut params: Vec<TokenStream> = params.iter().map(|p| get_param_name_and_type(p)).collect();
 
-    // let slf = quote! { &self };
-    // params.insert(0, slf);
-    // quote! { #(#params),* }
-    quote! {} // TODO
+    let slf = quote! { &self };
+    params.insert(0, slf);
+    Ok(quote! { #(#params),* })
 }
 
 fn get_type_for_schema(schema: &Schema) -> TokenStream {
@@ -336,7 +310,12 @@ fn create_function_return(op: &Operation) -> TokenStream {
     quote! { Result<()> }
 }
 
-fn create_function(cg: &CodeGen, path: &str, op: &Operation, param_re: &Regex) -> TokenStream {
+fn create_function(
+    cg: &CodeGen,
+    path: &str,
+    op: &Operation,
+    param_re: &Regex,
+) -> Result<TokenStream> {
     let name_default = "operation_id_missing";
     let name = ident(
         op.operation_id
@@ -367,7 +346,7 @@ fn create_function(cg: &CodeGen, path: &str, op: &Operation, param_re: &Regex) -
 
     // get path parameters
     // Option if not required
-    let fparams = create_function_params(cg, op);
+    let fparams = create_function_params(cg, op)?;
 
     // see if there is a body parameter
     // print_responses(&op);
@@ -393,7 +372,7 @@ fn create_function(cg: &CodeGen, path: &str, op: &Operation, param_re: &Regex) -
             }
         }
     };
-    TokenStream::from(func)
+    Ok(TokenStream::from(func))
 }
 
 pub fn create_client(cg: &CodeGen) -> Result<TokenStream> {

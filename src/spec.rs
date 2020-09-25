@@ -163,11 +163,11 @@ impl Spec {
     pub fn resolve_box_schemas(
         &self,
         doc_file: &str,
-        all_of: Vec<ReferenceOr<Box<Schema>>>,
+        schemas: &Vec<ReferenceOr<Box<Schema>>>,
     ) -> Result<Vec<Schema>> {
         let mut resolved = Vec::new();
-        for schema in all_of {
-            resolved.push(self.resolve_box_schema(doc_file, &schema)?);
+        for schema in schemas {
+            resolved.push(self.resolve_box_schema(doc_file, schema)?);
         }
         Ok(resolved)
     }
@@ -198,12 +198,24 @@ impl Spec {
     pub fn resolve_parameter(
         &self,
         doc_file: &str,
-        schema: &ReferenceOr<Parameter>,
+        parameter: &ReferenceOr<Parameter>,
     ) -> Result<Parameter> {
-        match schema {
+        match parameter {
             ReferenceOr::Item(param) => Ok(param.clone()),
             ReferenceOr::Reference { reference } => self.resolve_parameter_ref(doc_file, reference),
         }
+    }
+
+    pub fn resolve_parameters(
+        &self,
+        doc_file: &str,
+        parameters: &Vec<ReferenceOr<Parameter>>,
+    ) -> Result<Vec<Parameter>> {
+        let mut resolved = Vec::new();
+        for param in parameters {
+            resolved.push(self.resolve_parameter(doc_file, param)?);
+        }
+        Ok(resolved)
     }
 }
 
