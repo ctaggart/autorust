@@ -12,7 +12,7 @@ pub struct CodeGen {
     pub spec: Spec,
 }
 
-pub fn create_model(cg: &CodeGen) -> Result<TokenStream> {
+pub fn create_models(cg: &CodeGen) -> Result<TokenStream> {
     let mut tokens = TokenStream::new();
     let (root_path, root_doc) = cg.spec.docs.get_index(0).unwrap();
     let schemas = &cg

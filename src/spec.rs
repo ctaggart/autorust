@@ -38,7 +38,7 @@ impl Spec {
         let files = get_ref_files(&root)?;
         docs.insert(path.to_owned(), root);
         for file in files {
-            let doc_path = path_join(path, &file)?;
+            let doc_path = path_join(true, path, &file)?;
             let doc = read_api_file(&doc_path)?;
             docs.insert(doc_path, doc);
         }
@@ -84,7 +84,7 @@ impl Spec {
         let rf = Reference::parse(reference)?;
         let file = match rf.file {
             None => doc_file.to_owned(),
-            Some(file) => path_join(doc_file, &file)?,
+            Some(file) => path_join(true, doc_file, &file)?,
         };
         match rf.name {
             None => Err(format!("no name in reference {}", &reference))?,
@@ -103,7 +103,7 @@ impl Spec {
         let rf = Reference::parse(reference)?;
         let file = match rf.file {
             None => doc_file.to_owned(),
-            Some(file) => path_join(doc_file, &file)?,
+            Some(file) => path_join(true, doc_file, &file)?,
         };
         match rf.name {
             None => Err(format!("no name in reference {}", &reference))?,
