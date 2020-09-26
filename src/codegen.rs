@@ -2,8 +2,8 @@
 use crate::{format_code, pathitem_operations, Reference, Result, Spec};
 use autorust_openapi::{DataType, Operation, Parameter, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
-use proc_macro2::{Ident, TokenStream};
-use quote::{format_ident, quote};
+use proc_macro2::TokenStream;
+use quote::{format_ident, quote, ToTokens};
 use regex::Regex;
 use std::{collections::HashSet, fs::File, io::prelude::*};
 
@@ -120,13 +120,19 @@ fn create_struct_field_type(
     }
 }
 
-fn ident(word: &str) -> Ident {
-    let word = word.replace(".", "_");
-    if is_keyword(&word) {
-        format_ident!("{}_", word)
+fn ident(text: &str) -> TokenStream {
+    let text = text.replace(".", "_");
+    // prefix with underscore if starts with invalid character
+    let text = match text.chars().next().unwrap() {
+        '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0' => format!("_{}", text),
+        _ => text.to_owned(),
+    };
+    let idt = if is_keyword(&text) {
+        format_ident!("{}_", text)
     } else {
-        format_ident!("{}", word)
-    }
+        format_ident!("{}", text)
+    };
+    idt.into_token_stream()
 }
 
 fn create_struct(
@@ -308,7 +314,7 @@ fn create_function(
 
     let params = parse_params(param_re, path);
     // println!("path params {:#?}", params);
-    let params: Vec<Ident> = params.iter().map(|s| ident(&s.to_snake_case())).collect();
+    let params: Vec<_> = params.iter().map(|s| ident(&s.to_snake_case())).collect();
     let uri_str_args = quote! { #(#params),* };
 
     let fpath = format!("{{}}{}", &format_path(param_re, path));
@@ -368,5 +374,11 @@ mod tests {
         assert_eq!(idt, "odata.next_link");
         let idt = ident(&idt);
         assert_eq!(idt.to_string(), "odata_next_link");
+    }
+
+    #[test]
+    fn test_ident_three_dot_two() {
+        let idt = ident("3.2");
+        assert_eq!(idt.to_string(), "_3_2");
     }
 }
