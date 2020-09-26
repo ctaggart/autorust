@@ -121,7 +121,8 @@ fn create_struct_field_type(
 }
 
 fn ident(word: &str) -> Ident {
-    if is_keyword(word) {
+    let word = word.replace(".", "_");
+    if is_keyword(&word) {
         format_ident!("{}_", word)
     } else {
         format_ident!("{}", word)
@@ -355,4 +356,17 @@ pub fn create_client(cg: &CodeGen) -> Result<TokenStream> {
         }
     }
     Ok(file)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ident_odata_next_link() {
+        let idt = "odata.nextLink".to_snake_case();
+        assert_eq!(idt, "odata.next_link");
+        let idt = ident(&idt);
+        assert_eq!(idt.to_string(), "odata_next_link");
+    }
 }
