@@ -5,6 +5,7 @@ use heck::{CamelCase, SnakeCase};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use regex::Regex;
+use serde_json::Value;
 use std::{collections::HashSet, fs::File, io::prelude::*};
 
 /// code generation context
@@ -72,17 +73,28 @@ fn create_enum(struct_name: &str, property_name: &str, enum_values: Vec<&str>) -
     TokenStream::from(enm)
 }
 
-// type: "string", "array", "integer"
-// format: "uuid", "date-time", "i32"
+/// Wraps a type in an Option if is not required.
+fn require(is_required: bool, tp: TokenStream) -> TokenStream {
+    if is_required {
+        tp
+    } else {
+        quote! {Option<#tp>}
+    }
+}
+
+/// Creates the type reference for a struct field from a struct property.
+/// Optionally, creates an inner struct for an enum or a private schema.
 fn create_struct_field_type(
-    schema_type: Option<&DataType>,
-    items: &Option<ReferenceOr<Schema>>,
-    _schema_format: Option<&str>, // TODO
-    required: bool,
-    enum_values: Vec<&str>,
-    property_name: &str,
+    cg: &CodeGen,
+    doc_file: &str,
     struct_name: &str,
+    property_name: &str,
+    property: &Schema,
 ) -> Result<(TokenStream, Option<TokenStream>)> {
+    let schema_type = property.type_.as_ref();
+    let enum_values = enum_values_as_strings(&property.enum_);
+    // let _schema_format: &str = property.format.as_ref().map(String::as_ref); // TODO
+
     let mut enum_ts: Option<TokenStream> = None;
     let tp = if enum_values.len() > 0 {
         enum_ts = Some(create_enum(struct_name, property_name, enum_values));
@@ -94,7 +106,7 @@ fn create_struct_field_type(
         if let Some(schema_type) = schema_type {
             match schema_type {
                 DataType::Array => {
-                    let items = items.as_ref().ok_or_else(|| {
+                    let items = property.items.as_ref().as_ref().ok_or_else(|| {
                         format!(
                             "array expected to have items, struct {}, property {}",
                             struct_name, property_name
@@ -113,11 +125,7 @@ fn create_struct_field_type(
             unknown_type
         }
     };
-    if required {
-        Ok((tp, enum_ts))
-    } else {
-        Ok((quote! {Option<#tp>}, enum_ts))
-    }
+    Ok((tp, enum_ts))
 }
 
 fn ident(text: &str) -> TokenStream {
@@ -135,6 +143,17 @@ fn ident(text: &str) -> TokenStream {
     idt.into_token_stream()
 }
 
+fn enum_values_as_strings(values: &Vec<Value>) -> Vec<&str> {
+    let mut strings = Vec::new();
+    for v in values {
+        match v {
+            Value::String(s) => strings.push(s.as_str()),
+            _ => {}
+        }
+    }
+    strings
+}
+
 fn create_struct(
     cg: &CodeGen,
     doc_file: &str,
@@ -147,29 +166,22 @@ fn create_struct(
     let required: HashSet<&str> = schema.required.iter().map(String::as_str).collect();
 
     let properties = cg.spec.resolve_schema_map(doc_file, &schema.properties)?;
-    for (name, property) in &properties {
-        let nm = ident(&name.to_snake_case());
-        let is_required = required.contains(name.as_str());
-        let enum_values: Vec<&str> = property.enum_.iter().map(String::as_str).collect();
+    for (property_name, property) in &properties {
+        let nm = ident(&property_name.to_snake_case());
+        let (field_tp_name, field_tp) =
+            create_struct_field_type(cg, doc_file, struct_name, property_name, property)?;
+        let is_required = required.contains(property_name.as_str());
+        let field_tp_name = require(is_required, field_tp_name);
 
-        let (tp, inner_tp) = create_struct_field_type(
-            property.type_.as_ref(),
-            &property.items,
-            property.format.as_ref().map(String::as_ref),
-            is_required,
-            enum_values,
-            name,
-            struct_name,
-        )?;
-        if let Some(inner_tp) = inner_tp {
-            streams.push(inner_tp);
+        if let Some(field_tp) = field_tp {
+            streams.push(field_tp);
         }
         let skip_serialization_if = if is_required {
             quote! {}
         } else {
             quote! {skip_serializing_if = "Option::is_none"}
         };
-        let rename = if &nm.to_string() == name {
+        let rename = if &nm.to_string() == property_name {
             if is_required {
                 quote! {}
             } else {
@@ -177,14 +189,14 @@ fn create_struct(
             }
         } else {
             if is_required {
-                quote! {#[serde(rename = #name)]}
+                quote! {#[serde(rename = #property_name)]}
             } else {
-                quote! {#[serde(rename = #name, #skip_serialization_if)]}
+                quote! {#[serde(rename = #property_name, #skip_serialization_if)]}
             }
         };
         let prop = quote! {
             #rename
-            #nm: #tp,
+            #nm: #field_tp_name,
         };
         props.extend(prop);
     }
