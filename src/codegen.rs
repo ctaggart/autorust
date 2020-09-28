@@ -168,10 +168,10 @@ fn create_struct(
     let properties = cg.spec.resolve_schema_map(doc_file, &schema.properties)?;
     for (property_name, property) in &properties {
         let nm = ident(&property_name.to_snake_case());
-        let is_required = required.contains(property_name.as_str());
-
         let (field_tp_name, field_tp) =
             create_struct_field_type(cg, doc_file, struct_name, property_name, property)?;
+        let is_required = required.contains(property_name.as_str());
+        let field_tp_name = require(is_required, field_tp_name);
 
         if let Some(field_tp) = field_tp {
             streams.push(field_tp);
