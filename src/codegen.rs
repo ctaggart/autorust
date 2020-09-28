@@ -267,7 +267,7 @@ fn create_function_params(cg: &CodeGen, op: &Operation) -> Result<TokenStream> {
 
 fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
     match schema {
-        ReferenceOr::Reference { reference } => {
+        ReferenceOr::Reference { reference, .. } => {
             let rf = Reference::parse(&reference)?;
             let idt = ident(
                 &rf.name

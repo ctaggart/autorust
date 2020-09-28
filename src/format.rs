@@ -1,3 +1,4 @@
+#[cfg(feature = "fmt")]
 pub fn format_code(unformatted: String) -> String {
     let mut config = rustfmt_nightly::Config::default();
     config.set().edition(rustfmt_nightly::Edition::Edition2018);
@@ -24,4 +25,9 @@ pub fn format_code(unformatted: String) -> String {
         },
         Err(_err) => unformatted,
     }
+}
+
+#[cfg(not(feature = "fmt"))]
+pub fn format_code(unformatted: String) -> String {
+    unformatted
 }

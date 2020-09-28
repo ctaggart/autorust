@@ -13,10 +13,9 @@ name = "autorust"
 path = "src/main.rs"
 
 [dependencies]
-autorust_openapi = { git = "https://github.com/ctaggart/autorust_openapi" }
+autorust_openapi = { git = "https://github.com/ctaggart/autorust_openapi", rev = "81f0907f7adcf00cca18c89d09db80362b062096" }
 # autorust_openapi = { path = "../autorust_openapi" }
 quote = "*"
-rustfmt-nightly = { git = "https://github.com/rust-lang/rustfmt" }
 proc-macro2 = { version = "*", default-features = false }
 serde_json = "*"
 heck = "*"
@@ -24,3 +23,7 @@ regex = "*"
 indexmap = {version = "*", features = ["serde-1"]}
 path_abs = "*"
 clap = "3.0.0-beta.2"
+rustfmt-nightly = { git = "https://github.com/rust-lang/rustfmt", optional = true }
+
+[features]
+fmt = ["rustfmt-nightly"]

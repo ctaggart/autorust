@@ -48,7 +48,7 @@ impl Spec {
         for (file, doc) in &docs {
             for (name, schema) in &doc.definitions {
                 match schema {
-                    ReferenceOr::Reference { reference: _ } => {}
+                    ReferenceOr::Reference { .. } => {}
                     ReferenceOr::Item(schema) => {
                         // println!("insert schema {} {}", &file, &name);
                         schemas.insert(
@@ -121,7 +121,9 @@ impl Spec {
     pub fn resolve_schema(&self, doc_file: &str, schema: &ReferenceOr<Schema>) -> Result<Schema> {
         match schema {
             ReferenceOr::Item(schema) => Ok(schema.clone()),
-            ReferenceOr::Reference { reference } => self.resolve_schema_ref(doc_file, reference),
+            ReferenceOr::Reference { reference, .. } => {
+                self.resolve_schema_ref(doc_file, reference)
+            }
         }
     }
 
@@ -140,7 +142,7 @@ impl Spec {
     pub fn resolve_path(&self, _doc_file: &str, path: &ReferenceOr<PathItem>) -> Result<PathItem> {
         match path {
             ReferenceOr::Item(path) => Ok(path.clone()),
-            ReferenceOr::Reference { reference: _ } =>
+            ReferenceOr::Reference { .. } =>
             // self.resolve_path_ref(doc_file, reference),
             {
                 Err("path references not implemented")?
@@ -167,7 +169,9 @@ impl Spec {
     ) -> Result<Parameter> {
         match parameter {
             ReferenceOr::Item(param) => Ok(param.clone()),
-            ReferenceOr::Reference { reference } => self.resolve_parameter_ref(doc_file, reference),
+            ReferenceOr::Reference { reference, .. } => {
+                self.resolve_parameter_ref(doc_file, reference)
+            }
         }
     }
 
@@ -227,7 +231,7 @@ impl ToString for RefString {
 fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
     for (_, schema) in &schema.properties {
         match schema {
-            ReferenceOr::Reference { reference } => {
+            ReferenceOr::Reference { reference, .. } => {
                 list.push(RefString::Schema(reference.to_owned()))
             }
             ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
@@ -235,7 +239,7 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
     }
     match schema.additional_properties.as_ref() {
         Some(schema) => match schema {
-            ReferenceOr::Reference { reference } => {
+            ReferenceOr::Reference { reference, .. } => {
                 list.push(RefString::Schema(reference.to_owned()))
             }
             ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
@@ -244,7 +248,7 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
     }
     match schema.items.as_ref() {
         Some(schema) => match schema {
-            ReferenceOr::Reference { reference } => {
+            ReferenceOr::Reference { reference, .. } => {
                 list.push(RefString::Schema(reference.to_owned()))
             }
             ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
@@ -253,7 +257,7 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
     }
     for schema in &schema.all_of {
         match schema {
-            ReferenceOr::Reference { reference } => {
+            ReferenceOr::Reference { reference, .. } => {
                 list.push(RefString::Schema(reference.to_owned()))
             }
             ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
@@ -268,7 +272,7 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
     // paths and operations
     for (_path, item) in &api.paths {
         match item {
-            ReferenceOr::Reference { reference } => {
+            ReferenceOr::Reference { reference, .. } => {
                 list.push(RefString::PathItem(reference.to_owned()))
             }
             ReferenceOr::Item(item) => {
@@ -276,11 +280,11 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
                     // parameters
                     for prm in &op.parameters {
                         match prm {
-                            ReferenceOr::Reference { reference } => {
+                            ReferenceOr::Reference { reference, .. } => {
                                 list.push(RefString::Parameter(reference.to_owned()))
                             }
                             ReferenceOr::Item(parameter) => match &parameter.schema {
-                                Some(ReferenceOr::Reference { reference }) => {
+                                Some(ReferenceOr::Reference { reference, .. }) => {
                                     list.push(RefString::Schema(reference.to_owned()))
                                 }
                                 Some(ReferenceOr::Item(schema)) => {
@@ -294,7 +298,7 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
                     // responses
                     for (_code, rsp) in &op.responses {
                         match &rsp.schema {
-                            Some(ReferenceOr::Reference { reference }) => {
+                            Some(ReferenceOr::Reference { reference, .. }) => {
                                 list.push(RefString::Schema(reference.to_owned()))
                             }
                             Some(ReferenceOr::Item(schema)) => {
@@ -307,7 +311,7 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
                     // examples
                     for (_name, example) in &op.x_ms_examples {
                         match example {
-                            ReferenceOr::Reference { reference } => {
+                            ReferenceOr::Reference { reference, .. } => {
                                 list.push(RefString::Example(reference.to_owned()))
                             }
                             _ => {}
@@ -321,7 +325,7 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
     // definitions
     for (_name, schema) in &api.definitions {
         match schema {
-            ReferenceOr::Reference { reference } => {
+            ReferenceOr::Reference { reference, .. } => {
                 list.push(RefString::Schema(reference.to_owned()))
             }
             ReferenceOr::Item(schema) => add_refs_for_schema(&mut list, schema),
