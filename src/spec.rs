@@ -48,7 +48,7 @@ impl Spec {
         for (file, doc) in &docs {
             for (name, schema) in &doc.definitions {
                 match schema {
-                    ReferenceOr::Reference { reference: _, .. } => {}
+                    ReferenceOr::Reference { .. } => {}
                     ReferenceOr::Item(schema) => {
                         // println!("insert schema {} {}", &file, &name);
                         schemas.insert(
@@ -142,7 +142,7 @@ impl Spec {
     pub fn resolve_path(&self, _doc_file: &str, path: &ReferenceOr<PathItem>) -> Result<PathItem> {
         match path {
             ReferenceOr::Item(path) => Ok(path.clone()),
-            ReferenceOr::Reference { reference: _, .. } =>
+            ReferenceOr::Reference { .. } =>
             // self.resolve_path_ref(doc_file, reference),
             {
                 Err("path references not implemented")?
