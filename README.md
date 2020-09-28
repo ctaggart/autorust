@@ -4,11 +4,18 @@ A command line app similar to [AutoRest](https://github.com/azure/autorest), but
 
 ## Buliding
 
-The [rustfmt-nightly](https://github.com/rust-lang/rustfmt) dependency requires that a couple of environment variables be set.
+By default building the project is very straight forward:
+```sh
+cargo build
+```
+
+### Formatting
+
+If you want to format the generated code, you'll need to use a nightly compiler and ensure that the `fmt` feature is enabled. Additionally, the [rustfmt-nightly](https://github.com/rust-lang/rustfmt) dependency requires that a couple of environment variables be set.
 ``` sh
 export CFG_RELEASE_CHANNEL=nightly
 export CFG_RELEASE=nightly
-cargo build
+cargo +nightly build --features fmt
 ```
 
 ## Running
