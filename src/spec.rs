@@ -1,5 +1,5 @@
 use crate::{path_join, Reference, Result};
-use autorust_openapi::{OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
+use autorust_openapi::{AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use indexmap::{IndexMap, IndexSet};
 use std::{fs::File, io::prelude::*};
 
@@ -238,11 +238,14 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
         }
     }
     match schema.additional_properties.as_ref() {
-        Some(schema) => match schema {
-            ReferenceOr::Reference { reference, .. } => {
-                list.push(RefString::Schema(reference.to_owned()))
+        Some(ap) => match ap {
+            AdditionalProperties::Boolean(_) => {}
+            AdditionalProperties::Schema(schema) => match schema {
+                ReferenceOr::Reference { reference, .. } => {
+                    list.push(RefString::Schema(reference.to_owned()))
+                }
+                ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
             }
-            ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
         },
         _ => {}
     }
