@@ -18,6 +18,7 @@ autorust_openapi = { git = "https://github.com/ctaggart/autorust_openapi" }
 quote = "*"
 proc-macro2 = { version = "*", default-features = false }
 serde_json = "*"
+serde_yaml = "*"
 heck = "*"
 regex = "*"
 indexmap = {version = "*", features = ["serde-1"]}

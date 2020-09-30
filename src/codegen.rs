@@ -212,6 +212,7 @@ fn create_struct(
 }
 
 pub fn write_file(tokens: &TokenStream, path: &str) {
+    println!("writing file {}", path);
     let code = format_code(tokens.to_string());
     let mut buffer = File::create(path).unwrap();
     buffer.write_all(&code.as_bytes()).unwrap();

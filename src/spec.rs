@@ -3,7 +3,7 @@ use autorust_openapi::{
     AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema,
 };
 use indexmap::{IndexMap, IndexSet};
-use std::{fs::File, io::prelude::*};
+use std::{ffi::OsStr, fs::File, io::prelude::*, path::Path};
 
 #[derive(Clone, Debug)]
 pub struct Spec {
@@ -190,10 +190,17 @@ impl Spec {
     }
 }
 
-pub fn read_api_file(path: &str) -> Result<OpenAPI> {
+pub fn read_api_file<P: AsRef<Path>>(path: P) -> Result<OpenAPI> {
+    let path = path.as_ref();
     let mut bytes = Vec::new();
     File::open(path)?.read_to_end(&mut bytes)?;
-    let api = serde_json::from_slice(&bytes)?;
+    let api = if path.extension() == Some(OsStr::new("yaml"))
+        || path.extension() == Some(OsStr::new("yml"))
+    {
+        serde_yaml::from_slice(&bytes)?
+    } else {
+        serde_json::from_slice(&bytes)?
+    };
     Ok(api)
 }
 

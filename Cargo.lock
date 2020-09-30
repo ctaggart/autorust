@@ -67,12 +67,13 @@ dependencies = [
  "regex",
  "rustfmt-nightly",
  "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]
 name = "autorust_openapi"
 version = "0.2.0"
-source = "git+https://github.com/ctaggart/autorust_openapi#1e105bf255b93467b1b0e838ed7f87150ef77dfe"
+source = "git+https://github.com/ctaggart/autorust_openapi#01d09037263638af755c5aec4a77835df1801bea"
 dependencies = [
  "indexmap",
  "serde",
@@ -311,6 +312,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dtoa"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "134951f4028bdadb9b84baf4232681efbf277da25144b9b0ad65df75946c422b"
+
+[[package]]
 name = "dunce"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -493,6 +500,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2f96b10ec2560088a8e76961b00d47107b3a625fecb76dedb29ee7ccbf98235"
 
 [[package]]
+name = "linked-hash-map"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8dd5a6d5999d9907cda8ed67bbd137d3af8085216c2ac62de5be860bd41f304a"
+
+[[package]]
 name = "lock_api"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -661,9 +674,9 @@ dependencies = [
 
 [[package]]
 name = "pin-project-lite"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71f349a4f0e70676ffb2dbafe16d0c992382d02f0a952e3ddf584fc289dac6b3"
+checksum = "4fe74897791e156a0cd8cce0db31b9b2198e67877316bf3086c3acd187f719f0"
 
 [[package]]
 name = "ppv-lite86"
@@ -1155,7 +1168,7 @@ dependencies = [
 [[package]]
 name = "rustfmt-config_proc_macro"
 version = "0.5.1"
-source = "git+https://github.com/rust-lang/rustfmt#2927e89b5194ecc887d61249eed9739ff1c3a3d5"
+source = "git+https://github.com/rust-lang/rustfmt#22c4437b3f1812d90b6f3313de574065481a99b4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1165,7 +1178,7 @@ dependencies = [
 [[package]]
 name = "rustfmt-nightly"
 version = "2.0.0-rc.2"
-source = "git+https://github.com/rust-lang/rustfmt#2927e89b5194ecc887d61249eed9739ff1c3a3d5"
+source = "git+https://github.com/rust-lang/rustfmt#22c4437b3f1812d90b6f3313de574065481a99b4"
 dependencies = [
  "annotate-snippets",
  "anyhow",
@@ -1261,13 +1274,25 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.57"
+version = "1.0.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "164eacbdb13512ec2745fb09d51fd5b22b0d65ed294a1dcf7285a360c80a675c"
+checksum = "a230ea9107ca2220eea9d46de97eddcb04cd00e92d13dda78e478dd33fa82bd4"
 dependencies = [
  "itoa",
  "ryu",
  "serde",
+]
+
+[[package]]
+name = "serde_yaml"
+version = "0.8.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae3e2dd40a7cdc18ca80db804b7f461a39bb721160a85c9a1fa30134bf3c02a5"
+dependencies = [
+ "dtoa",
+ "linked-hash-map",
+ "serde",
+ "yaml-rust",
 ]
 
 [[package]]
@@ -1587,6 +1612,15 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "yaml-rust"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39f0c922f1a334134dc2f7a8b67dc5d25f0735263feec974345ff706bcf20b0d"
+dependencies = [
+ "linked-hash-map",
+]
 
 [[package]]
 name = "yansi-term"
