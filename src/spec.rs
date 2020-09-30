@@ -1,5 +1,7 @@
 use crate::{path_join, Reference, Result};
-use autorust_openapi::{AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
+use autorust_openapi::{
+    AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema,
+};
 use indexmap::{IndexMap, IndexSet};
 use std::{fs::File, io::prelude::*};
 
@@ -195,20 +197,58 @@ pub fn read_api_file(path: &str) -> Result<OpenAPI> {
     Ok(api)
 }
 
-pub fn pathitem_operations(item: &PathItem) -> impl Iterator<Item = &Operation> {
+pub enum OperationVerb<'a> {
+    Get(&'a Operation),
+    Post(&'a Operation),
+    Put(&'a Operation),
+    Patch(&'a Operation),
+    Delete(&'a Operation),
+    Options(&'a Operation),
+    Head(&'a Operation),
+}
+
+// Hold an operation and remembers the operation verb.
+impl<'a> OperationVerb<'a> {
+    pub fn operation(&self) -> &'a Operation {
+        match self {
+            OperationVerb::Get(op) => op,
+            OperationVerb::Post(op) => op,
+            OperationVerb::Put(op) => op,
+            OperationVerb::Patch(op) => op,
+            OperationVerb::Delete(op) => op,
+            OperationVerb::Options(op) => op,
+            OperationVerb::Head(op) => op,
+        }
+    }
+
+    pub fn verb_name(&self) -> &'static str {
+        match self {
+            OperationVerb::Get(_) => "get",
+            OperationVerb::Post(_) => "post",
+            OperationVerb::Put(_) => "put",
+            OperationVerb::Patch(_) => "patch",
+            OperationVerb::Delete(_) => "delete",
+            OperationVerb::Options(_) => "options",
+            OperationVerb::Head(_) => "head",
+        }
+    }
+}
+
+pub fn pathitem_operations(item: &PathItem) -> impl Iterator<Item = OperationVerb> {
     vec![
-        item.get.as_ref(),
-        item.post.as_ref(),
-        item.put.as_ref(),
-        item.patch.as_ref(),
-        item.delete.as_ref(),
-        item.options.as_ref(),
-        item.head.as_ref(),
+        item.get.as_ref().map(OperationVerb::Get),
+        item.post.as_ref().map(OperationVerb::Post),
+        item.put.as_ref().map(OperationVerb::Put),
+        item.patch.as_ref().map(OperationVerb::Patch),
+        item.delete.as_ref().map(OperationVerb::Delete),
+        item.options.as_ref().map(OperationVerb::Options),
+        item.head.as_ref().map(OperationVerb::Head),
     ]
     .into_iter()
     .filter_map(|x| x)
 }
 
+/// Holds a $ref string and remembers the type.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RefString {
     PathItem(String),
@@ -245,7 +285,7 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
                     list.push(RefString::Schema(reference.to_owned()))
                 }
                 ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
-            }
+            },
         },
         _ => {}
     }
@@ -279,7 +319,8 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
                 list.push(RefString::PathItem(reference.to_owned()))
             }
             ReferenceOr::Item(item) => {
-                for op in pathitem_operations(&item) {
+                for verb in pathitem_operations(&item) {
+                    let op = verb.operation();
                     // parameters
                     for prm in &op.parameters {
                         match prm {
