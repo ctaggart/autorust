@@ -1,6 +1,6 @@
 #![allow(unused_variables, dead_code)]
-use crate::{format_code, pathitem_operations, Reference, Result, Spec};
-use autorust_openapi::{DataType, Operation, Parameter, ReferenceOr, Schema};
+use crate::{format_code, pathitem_operations, OperationVerb, Reference, Result, Spec};
+use autorust_openapi::{DataType, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
@@ -115,7 +115,7 @@ fn create_struct_field_type(
                     let vec_items_typ = get_type_for_schema(&items)?;
                     quote! {Vec<#vec_items_typ>}
                 }
-                DataType::Integer => quote! {i32},
+                DataType::Integer => quote! {i64},
                 DataType::Number => quote! {f64},
                 DataType::String => quote! {String},
                 DataType::Boolean => quote! {bool},
@@ -202,7 +202,7 @@ fn create_struct(
     }
 
     let st = quote! {
-        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         pub struct #nm {
             #props
         }
@@ -226,7 +226,7 @@ fn trim_ref(path: &str) -> String {
 fn map_type(param_type: &DataType) -> TokenStream {
     match param_type {
         DataType::String => quote! { &str },
-        DataType::Integer => quote! { i32 },
+        DataType::Integer => quote! { i64 },
         _ => {
             quote! {map_type} // TODO may be Err instead
         }
@@ -272,7 +272,7 @@ fn create_function_params(cg: &CodeGen, op: &Operation) -> Result<TokenStream> {
     for param in &parameters {
         params.push(get_param_name_and_type(param)?);
     }
-    let slf = quote! { &self };
+    let slf = quote! { configuration: &Configuration };
     params.insert(0, slf);
     Ok(quote! { #(#params),* })
 }
@@ -287,7 +287,27 @@ fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
             );
             Ok(quote! { #idt })
         }
-        ReferenceOr::Item(_) => {
+        ReferenceOr::Item(schema) => {
+            if let Some(schema_type) = &schema.type_ {
+                let ts = match schema_type {
+                    DataType::Array => {
+                        let items = schema
+                            .items
+                            .as_ref()
+                            .as_ref()
+                            .ok_or_else(|| format!("array expected to have items"))?;
+                        let vec_items_typ = get_type_for_schema(&items)?;
+                        quote! {Vec<#vec_items_typ>}
+                    }
+                    DataType::Integer => quote! {i64},
+                    DataType::Number => quote! {f64},
+                    DataType::String => quote! {String},
+                    DataType::Boolean => quote! {bool},
+                    DataType::Object => quote! {serde::Value},
+                };
+                return Ok(ts);
+            }
+
             // TODO probably need to create a struct
             // and have a way to name it
             let idt = ident("NoParamType2");
@@ -297,10 +317,10 @@ fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
 }
 
 // TODO is _ref_param not needed for a return
-fn create_function_return(op: &Operation) -> Result<TokenStream> {
+fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
     // TODO error responses
     // TODO union of responses
-    for (_http_code, rsp) in op.responses.iter() {
+    for (_http_code, rsp) in verb.operation().responses.iter() {
         // println!("response key {:#?} {:#?}", key, rsp);
         if let Some(schema) = &rsp.schema {
             let tp = get_type_for_schema(schema)?;
@@ -310,18 +330,32 @@ fn create_function_return(op: &Operation) -> Result<TokenStream> {
     Ok(quote! { Result<()> })
 }
 
+/// Creating a function name from the path and verb when an operationId is not specified.
+/// All azure-rest-api-specs operations should have an operationId.
+fn create_function_name(path: &str, verb_name: &str) -> String {
+    let mut path = path
+        .split('/')
+        .filter(|&x| !x.is_empty())
+        .collect::<Vec<_>>();
+    path.push(verb_name);
+    path.join("_")
+}
+
 fn create_function(
     cg: &CodeGen,
     path: &str,
-    op: &Operation,
+    item: &PathItem,
+    operation_verb: &OperationVerb,
     param_re: &Regex,
 ) -> Result<TokenStream> {
-    let name_default = "operation_id_missing";
-    let name = ident(
-        op.operation_id
+    let fname = ident(
+        operation_verb
+            .operation()
+            .operation_id
             .as_ref()
-            .map(String::as_ref)
-            .unwrap_or(name_default),
+            .unwrap_or(&create_function_name(path, operation_verb.verb_name()))
+            .to_snake_case()
+            .as_ref(),
     );
 
     let params = parse_params(param_re, path);
@@ -333,19 +367,28 @@ fn create_function(
 
     // get path parameters
     // Option if not required
-    let fparams = create_function_params(cg, op)?;
+    let fparams = create_function_params(cg, operation_verb.operation())?;
 
     // see if there is a body parameter
-    let fresponse = create_function_return(op)?;
+    let fresponse = create_function_return(operation_verb)?;
 
+    let client_verb = match operation_verb {
+        OperationVerb::Get(_) => quote! { client.get(uri_str) },
+        OperationVerb::Post(_) => quote! { client.post(uri_str) },
+        OperationVerb::Put(_) => quote! { client.put(uri_str) },
+        OperationVerb::Patch(_) => quote! { client.patch(uri_str) },
+        OperationVerb::Delete(_) => quote! { client.delete(uri_str) },
+        OperationVerb::Options(_) => quote! { client.options(uri_str) },
+        OperationVerb::Head(_) => quote! { client.head(uri_str) },
+    };
+
+    // TODO #17 decode the different errors depending on http status
+    // TODO #18 other callbacks like auth
     let func = quote! {
-        pub async fn #name(#fparams) -> #fresponse {
-            let configuration = self.configuration;
+        pub async fn #fname(#fparams) -> #fresponse {
             let client = &configuration.client;
-            let uri_str = format!(#fpath, configuration.base_path, #uri_str_args);
-            // TODO client.get, put, post, delete
-            let mut req_builder = client.get(uri_str.as_str());
-            // TODO other callbacks like auth
+            let uri_str = &format!(#fpath, &configuration.base_path, #uri_str_args);
+            let mut req_builder = #client_verb;
             let req = req_builder.build()?;
             let res = client.execute(req).await?;
             match res.error_for_status_ref() {
@@ -370,7 +413,7 @@ pub fn create_client(cg: &CodeGen) -> Result<TokenStream> {
         // println!("{}", path);
         for op in pathitem_operations(item) {
             // println!("{:?}", op.operation_id);
-            file.extend(create_function(cg, &path, &op, &param_re))
+            file.extend(create_function(cg, path, item, &op, &param_re))
         }
     }
     Ok(file)
@@ -392,5 +435,10 @@ mod tests {
     fn test_ident_three_dot_two() {
         let idt = ident("3.2");
         assert_eq!(idt.to_string(), "_3_2");
+    }
+
+    #[test]
+    fn test_create_function_name() {
+        assert_eq!(create_function_name("/pets", "get"), "pets_get");
     }
 }
