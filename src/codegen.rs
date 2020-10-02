@@ -1,5 +1,7 @@
 #![allow(unused_variables, dead_code)]
-use crate::{format_code, pathitem_operations, OperationVerb, Reference, Result, Spec};
+use crate::{
+    format_code, pathitem_operations, OperationVerb, Reference, ResolvedSchema, Result, Spec,
+};
 use autorust_openapi::{DataType, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
 use proc_macro2::TokenStream;
@@ -89,43 +91,58 @@ fn create_struct_field_type(
     doc_file: &str,
     struct_name: &str,
     property_name: &str,
-    property: &Schema,
+    property: &ResolvedSchema,
 ) -> Result<(TokenStream, Option<TokenStream>)> {
-    let schema_type = property.type_.as_ref();
-    let enum_values = enum_values_as_strings(&property.enum_);
-    // let _schema_format: &str = property.format.as_ref().map(String::as_ref); // TODO
-
-    let mut enum_ts: Option<TokenStream> = None;
-    let tp = if enum_values.len() > 0 {
-        enum_ts = Some(create_enum(struct_name, property_name, enum_values));
-        let ns = ident(&struct_name.to_snake_case());
-        let id = ident(&property_name.to_camel_case());
-        TokenStream::from(quote! {#ns::#id})
-    } else {
-        let unknown_type = quote!(UnknownType);
-        if let Some(schema_type) = schema_type {
-            match schema_type {
-                DataType::Array => {
-                    let items = property.items.as_ref().as_ref().ok_or_else(|| {
-                        format!(
-                            "array expected to have items, struct {}, property {}",
-                            struct_name, property_name
-                        )
-                    })?;
-                    let vec_items_typ = get_type_for_schema(&items)?;
-                    quote! {Vec<#vec_items_typ>}
-                }
-                DataType::Integer => quote! {i64},
-                DataType::Number => quote! {f64},
-                DataType::String => quote! {String},
-                DataType::Boolean => quote! {bool},
-                _ => unknown_type,
-            }
-        } else {
-            unknown_type
+    match &property.ref_key {
+        Some(ref_key) => {
+            let tp = ident(&ref_key.name.to_camel_case());
+            Ok((tp, None))
         }
-    };
-    Ok((tp, enum_ts))
+        None => {
+            let schema_type = property.schema.type_.as_ref();
+            let enum_values = enum_values_as_strings(&property.schema.enum_);
+            // let _schema_format: &str = property.format.as_ref().map(String::as_ref); // TODO
+            let mut enum_ts: Option<TokenStream> = None;
+            let tp = if enum_values.len() > 0 {
+                enum_ts = Some(create_enum(struct_name, property_name, enum_values));
+                let ns = ident(&struct_name.to_snake_case());
+                let id = ident(&property_name.to_camel_case());
+                TokenStream::from(quote! {#ns::#id})
+            } else {
+                let unknown_type = quote!(UnknownType);
+                if let Some(schema_type) = schema_type {
+                    match schema_type {
+                        DataType::Array => {
+                            let items =
+                                property.schema.items.as_ref().as_ref().ok_or_else(|| {
+                                    format!(
+                                        "array expected to have items, struct {}, property {}",
+                                        struct_name, property_name
+                                    )
+                                })?;
+                            let vec_items_typ = get_type_for_schema(&items)?;
+                            quote! {Vec<#vec_items_typ>}
+                        }
+                        DataType::Integer => quote! {i64},
+                        DataType::Number => quote! {f64},
+                        DataType::String => quote! {String},
+                        DataType::Boolean => quote! {bool},
+                        _ => {
+                            eprintln!(
+                                "UnknownType for Array {} {} {}",
+                                doc_file, struct_name, property_name
+                            );
+                            unknown_type
+                        }
+                    }
+                } else {
+                    eprintln!("UnknownType {} {} {}", doc_file, struct_name, property_name);
+                    unknown_type
+                }
+            };
+            Ok((tp, enum_ts))
+        }
+    }
 }
 
 fn ident(text: &str) -> TokenStream {
@@ -158,14 +175,16 @@ fn create_struct(
     cg: &CodeGen,
     doc_file: &str,
     struct_name: &str,
-    schema: &Schema,
+    schema: &ResolvedSchema,
 ) -> Result<Vec<TokenStream>> {
     let mut streams = vec![];
     let mut props = TokenStream::new();
     let nm = ident(&struct_name.to_camel_case());
-    let required: HashSet<&str> = schema.required.iter().map(String::as_str).collect();
+    let required: HashSet<&str> = schema.schema.required.iter().map(String::as_str).collect();
 
-    let properties = cg.spec.resolve_schema_map(doc_file, &schema.properties)?;
+    let properties = cg
+        .spec
+        .resolve_schema_map(doc_file, &schema.schema.properties)?;
     for (property_name, property) in &properties {
         let nm = ident(&property_name.to_snake_case());
         let (field_tp_name, field_tp) =
@@ -317,7 +336,6 @@ fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
     }
 }
 
-// TODO is _ref_param not needed for a return
 fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
     // TODO error responses
     // TODO union of responses
