@@ -15,9 +15,14 @@ pub struct Spec {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct RefKey {
-    file: String,
-    name: String,
+pub struct RefKey {
+    pub file: String,
+    pub name: String,
+}
+
+pub struct ResolvedSchema {
+    pub ref_key: Option<RefKey>,
+    pub schema: Schema,
 }
 
 impl Spec {
@@ -82,7 +87,7 @@ impl Spec {
         })
     }
 
-    pub fn resolve_schema_ref(&self, doc_file: &str, reference: &str) -> Result<Schema> {
+    pub fn resolve_schema_ref(&self, doc_file: &str, reference: &str) -> Result<ResolvedSchema> {
         let rf = Reference::parse(reference)?;
         let file = match rf.file {
             None => doc_file.to_owned(),
@@ -90,14 +95,21 @@ impl Spec {
         };
         match rf.name {
             None => Err(format!("no name in reference {}", &reference))?,
-            Some(nm) => Ok(self
-                .schemas
-                .get(&RefKey {
+            Some(nm) => {
+                let ref_key = RefKey {
                     file: file.clone(),
                     name: nm.clone(),
+                };
+                let schema = self
+                    .schemas
+                    .get(&ref_key)
+                    .ok_or_else(|| format!("schema not found {} {}", &file, &nm))?
+                    .clone();
+                Ok(ResolvedSchema {
+                    ref_key: Some(ref_key),
+                    schema,
                 })
-                .ok_or_else(|| format!("schema not found {} {}", &file, &nm))?
-                .clone()),
+            }
         }
     }
 
@@ -120,9 +132,16 @@ impl Spec {
         }
     }
 
-    pub fn resolve_schema(&self, doc_file: &str, schema: &ReferenceOr<Schema>) -> Result<Schema> {
+    pub fn resolve_schema(
+        &self,
+        doc_file: &str,
+        schema: &ReferenceOr<Schema>,
+    ) -> Result<ResolvedSchema> {
         match schema {
-            ReferenceOr::Item(schema) => Ok(schema.clone()),
+            ReferenceOr::Item(schema) => Ok(ResolvedSchema {
+                ref_key: None,
+                schema: schema.clone(),
+            }),
             ReferenceOr::Reference { reference, .. } => {
                 self.resolve_schema_ref(doc_file, reference)
             }
@@ -133,7 +152,7 @@ impl Spec {
         &self,
         doc_file: &str,
         schemas: &IndexMap<String, ReferenceOr<Schema>>,
-    ) -> Result<IndexMap<String, Schema>> {
+    ) -> Result<IndexMap<String, ResolvedSchema>> {
         let mut resolved = IndexMap::new();
         for (name, schema) in schemas {
             resolved.insert(name.clone(), self.resolve_schema(doc_file, schema)?);
