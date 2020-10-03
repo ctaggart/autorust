@@ -15,6 +15,24 @@ pub struct CodeGen {
     pub spec: Spec,
 }
 
+fn is_schema_an_array(schema: &ResolvedSchema) -> bool {
+    match &schema.schema.type_ {
+        Some(tp) => match tp {
+            DataType::Array => true,
+            _ => false,
+        },
+        None => false,
+    }
+}
+
+fn get_schema_array_items(schema: &Schema) -> Result<&ReferenceOr<Schema>> {
+    Ok(schema
+        .items
+        .as_ref()
+        .as_ref()
+        .ok_or_else(|| format!("array expected to have items"))?)
+}
+
 pub fn create_models(cg: &CodeGen) -> Result<TokenStream> {
     let mut tokens = TokenStream::new();
     let (root_path, root_doc) = cg.spec.docs.get_index(0).unwrap();
@@ -22,8 +40,12 @@ pub fn create_models(cg: &CodeGen) -> Result<TokenStream> {
         .spec
         .resolve_schema_map(root_path, &root_doc.definitions)?;
     for (name, schema) in schemas {
-        for stream in create_struct(cg, root_path, name, schema)? {
-            tokens.extend(stream);
+        if is_schema_an_array(schema) {
+            tokens.extend(create_vec_alias(cg, root_path, name, schema)?);
+        } else {
+            for stream in create_struct(cg, root_path, name, schema)? {
+                tokens.extend(stream);
+            }
         }
     }
     Ok(tokens)
@@ -171,6 +193,19 @@ fn enum_values_as_strings(values: &Vec<Value>) -> Vec<&str> {
     strings
 }
 
+/// example: pub type Pets = Vec<Pet>;
+fn create_vec_alias(
+    cg: &CodeGen,
+    doc_file: &str,
+    alias_name: &str,
+    schema: &ResolvedSchema,
+) -> Result<TokenStream> {
+    let items = get_schema_array_items(&schema.schema)?;
+    let typ = ident(&alias_name.to_camel_case());
+    let items_typ = get_type_for_schema(&items)?;
+    Ok(quote! { pub type #typ = Vec<#items_typ>; })
+}
+
 fn create_struct(
     cg: &CodeGen,
     doc_file: &str,
@@ -311,11 +346,7 @@ fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
             if let Some(schema_type) = &schema.type_ {
                 let ts = match schema_type {
                     DataType::Array => {
-                        let items = schema
-                            .items
-                            .as_ref()
-                            .as_ref()
-                            .ok_or_else(|| format!("array expected to have items"))?;
+                        let items = get_schema_array_items(schema)?;
                         let vec_items_typ = get_type_for_schema(&items)?;
                         quote! {Vec<#vec_items_typ>}
                     }
