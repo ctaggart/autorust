@@ -16,7 +16,7 @@ pub struct CodeGen {
 }
 
 fn is_schema_an_array(schema: &ResolvedSchema) -> bool {
-    match &schema.schema.type_ {
+    match &schema.schema.common.type_ {
         Some(tp) => match tp {
             DataType::Array => true,
             _ => false,
@@ -27,7 +27,7 @@ fn is_schema_an_array(schema: &ResolvedSchema) -> bool {
 
 fn get_schema_array_items(schema: &Schema) -> Result<&ReferenceOr<Schema>> {
     Ok(schema
-        .items
+        .common.items
         .as_ref()
         .as_ref()
         .ok_or_else(|| format!("array expected to have items"))?)
@@ -121,8 +121,8 @@ fn create_struct_field_type(
             Ok((tp, None))
         }
         None => {
-            let schema_type = property.schema.type_.as_ref();
-            let enum_values = enum_values_as_strings(&property.schema.enum_);
+            let schema_type = property.schema.common.type_.as_ref();
+            let enum_values = enum_values_as_strings(&property.schema.common.enum_);
             // let _schema_format: &str = property.format.as_ref().map(String::as_ref); // TODO
             let mut enum_ts: Option<TokenStream> = None;
             let tp = if enum_values.len() > 0 {
@@ -136,7 +136,7 @@ fn create_struct_field_type(
                     match schema_type {
                         DataType::Array => {
                             let items =
-                                property.schema.items.as_ref().as_ref().ok_or_else(|| {
+                                property.schema.common.items.as_ref().as_ref().ok_or_else(|| {
                                     format!(
                                         "array expected to have items, struct {}, property {}",
                                         struct_name, property_name
@@ -290,7 +290,7 @@ fn map_type(param_type: &DataType) -> TokenStream {
 
 fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     // let required = required.map_or(false); // TODO
-    if let Some(param_type) = &param.type_ {
+    if let Some(param_type) = &param.common.type_ {
         Ok(map_type(param_type))
     } else if let Some(schema) = &param.schema {
         Ok(get_type_for_schema(schema)?)
@@ -343,7 +343,7 @@ fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
             Ok(quote! { #idt })
         }
         ReferenceOr::Item(schema) => {
-            if let Some(schema_type) = &schema.type_ {
+            if let Some(schema_type) = &schema.common.type_ {
                 let ts = match schema_type {
                     DataType::Array => {
                         let items = get_schema_array_items(schema)?;
