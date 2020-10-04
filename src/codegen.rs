@@ -27,7 +27,8 @@ fn is_schema_an_array(schema: &ResolvedSchema) -> bool {
 
 fn get_schema_array_items(schema: &Schema) -> Result<&ReferenceOr<Schema>> {
     Ok(schema
-        .common.items
+        .common
+        .items
         .as_ref()
         .as_ref()
         .ok_or_else(|| format!("array expected to have items"))?)
@@ -135,13 +136,14 @@ fn create_struct_field_type(
                 if let Some(schema_type) = schema_type {
                     match schema_type {
                         DataType::Array => {
-                            let items =
-                                property.schema.common.items.as_ref().as_ref().ok_or_else(|| {
+                            let items = property.schema.common.items.as_ref().as_ref().ok_or_else(
+                                || {
                                     format!(
                                         "array expected to have items, struct {}, property {}",
                                         struct_name, property_name
                                     )
-                                })?;
+                                },
+                            )?;
                             let vec_items_typ = get_type_for_schema(&items)?;
                             quote! {Vec<#vec_items_typ>}
                         }
