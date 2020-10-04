@@ -315,7 +315,7 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
         },
         _ => {}
     }
-    match schema.items.as_ref() {
+    match schema.common.items.as_ref() {
         Some(schema) => match schema {
             ReferenceOr::Reference { reference, .. } => {
                 list.push(RefString::Schema(reference.to_owned()))
