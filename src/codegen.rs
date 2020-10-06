@@ -124,7 +124,6 @@ fn create_struct_field_type(
         None => {
             let schema_type = property.schema.common.type_.as_ref();
             let enum_values = enum_values_as_strings(&property.schema.common.enum_);
-            // let _schema_format: &str = property.format.as_ref().map(String::as_ref); // TODO
             let mut enum_ts: Option<TokenStream> = None;
             let tp = if enum_values.len() > 0 {
                 enum_ts = Some(create_enum(struct_name, property_name, enum_values));
@@ -134,30 +133,30 @@ fn create_struct_field_type(
             } else {
                 let unknown_type = quote!(UnknownType);
                 if let Some(schema_type) = schema_type {
+                    let format = property.schema.common.format.as_deref();
                     match schema_type {
                         DataType::Array => {
-                            let items = property.schema.common.items.as_ref().as_ref().ok_or_else(
-                                || {
-                                    format!(
-                                        "array expected to have items, struct {}, property {}",
-                                        struct_name, property_name
-                                    )
-                                },
-                            )?;
+                            let items = get_schema_array_items(&property.schema)?;
                             let vec_items_typ = get_type_for_schema(&items)?;
                             quote! {Vec<#vec_items_typ>}
                         }
-                        DataType::Integer => quote! {i64},
-                        DataType::Number => quote! {f64},
+                        DataType::Integer => {
+                            if format == Some("int32") {
+                                quote! {i32}
+                            } else {
+                                quote! {i64}
+                            }
+                        }
+                        DataType::Number => quote! {
+                            if format == Some("float"){
+                                quote! {f32}
+                            } else {
+                                quote! {f64}
+                            }
+                        },
                         DataType::String => quote! {String},
                         DataType::Boolean => quote! {bool},
-                        _ => {
-                            eprintln!(
-                                "UnknownType for Array {} {} {}",
-                                doc_file, struct_name, property_name
-                            );
-                            unknown_type
-                        }
+                        DataType::Object => quote! {serde::Value},
                     }
                 } else {
                     eprintln!("UnknownType {} {} {}", doc_file, struct_name, property_name);
@@ -346,14 +345,27 @@ fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
         }
         ReferenceOr::Item(schema) => {
             if let Some(schema_type) = &schema.common.type_ {
+                let format = schema.common.format.as_deref();
                 let ts = match schema_type {
                     DataType::Array => {
                         let items = get_schema_array_items(schema)?;
                         let vec_items_typ = get_type_for_schema(&items)?;
                         quote! {Vec<#vec_items_typ>}
                     }
-                    DataType::Integer => quote! {i64},
-                    DataType::Number => quote! {f64},
+                    DataType::Integer => {
+                        if format == Some("int32") {
+                            quote! {i32}
+                        } else {
+                            quote! {i64}
+                        }
+                    }
+                    DataType::Number => quote! {
+                        if format == Some("float"){
+                            quote! {f32}
+                        } else {
+                            quote! {f64}
+                        }
+                    },
                     DataType::String => quote! {String},
                     DataType::Boolean => quote! {bool},
                     DataType::Object => quote! {serde::Value},
