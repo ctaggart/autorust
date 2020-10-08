@@ -1,5 +1,6 @@
 use crate::Result;
 use clap::{App, Arg, ArgMatches};
+use std::path::{Path, PathBuf};
 
 const NAME: &str = env!("CARGO_PKG_NAME");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -9,11 +10,43 @@ const GENERATED: &str = "generated";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
-    pub input_files: Vec<String>,
-    pub output_folder: String,
+    input_files: Vec<PathBuf>,
+    output_folder: PathBuf,
 }
 
-pub fn new_app() -> App<'static> {
+impl Config {
+    pub fn try_new() -> Result<Config> {
+        let arg_matches = new_app().get_matches();
+        Self::try_new_from_matches(&arg_matches)
+    }
+
+    fn try_new_from_matches(arg_matches: &ArgMatches) -> Result<Config> {
+        let input_files = arg_matches
+            .values_of(INPUT_FILE)
+            .unwrap()
+            .map(|s| s.into())
+            .collect::<Vec<_>>();
+        let output_folder = arg_matches
+            .value_of(OUTPUT_FOLDER)
+            .unwrap()
+            .to_owned()
+            .into();
+        Ok(Config {
+            input_files,
+            output_folder,
+        })
+    }
+
+    pub fn input_files(&self) -> &[PathBuf] {
+        &self.input_files
+    }
+
+    pub fn output_folder(&self) -> &Path {
+        &self.output_folder
+    }
+}
+
+fn new_app() -> App<'static> {
     App::new(NAME)
     .version(VERSION)
     .arg(Arg::new(INPUT_FILE)
@@ -27,20 +60,6 @@ pub fn new_app() -> App<'static> {
         .long(OUTPUT_FOLDER)
         .takes_value(true)
         .default_value(GENERATED))
-}
-
-pub fn new_config(arg_matches: &ArgMatches) -> Result<Config> {
-    let m = arg_matches;
-    let input_files = m.values_of(INPUT_FILE).unwrap().collect::<Vec<_>>();
-    let input_files = input_files
-        .iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<_>>();
-    let output_folder = m.value_of(OUTPUT_FOLDER).unwrap().to_owned();
-    Ok(Config {
-        input_files,
-        output_folder,
-    })
 }
 
 #[cfg(test)]
@@ -102,9 +121,11 @@ mod tests {
         ]);
         assert!(m.is_ok(), "{:?}", m);
         let m = m?;
-        let c = new_config(&m)?;
-        assert_eq!(c.input_files, ["abc.json", "def.json"]);
-        assert_eq!(c.output_folder, "src");
+        let c = Config::try_new_from_matches(&m)?;
+        let input_files: [PathBuf; 2] = ["abc.json".into(), "def.json".into()];
+        assert_eq!(c.input_files, input_files);
+        let output_folder: PathBuf = "src".into();
+        assert_eq!(c.output_folder, output_folder);
         Ok(())
     }
 }
