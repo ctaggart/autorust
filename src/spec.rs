@@ -5,15 +5,14 @@ use autorust_openapi::{
 use indexmap::{IndexMap, IndexSet};
 use std::{
     ffi::OsStr,
-    fs::File,
-    io::prelude::*,
+    fs,
     path::{Path, PathBuf},
 };
 
+/// An API specification
 #[derive(Clone, Debug)]
 pub struct Spec {
-    /// multiple documents for an API specification
-    /// the first one is the root
+    /// Documents for an API specification where the first one is the root
     pub docs: IndexMap<PathBuf, OpenAPI>,
     schemas: IndexMap<RefKey, Schema>,
     parameters: IndexMap<RefKey, Parameter>,
@@ -48,12 +47,14 @@ impl Spec {
 
     pub fn read_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref().to_owned();
+
         let mut docs = IndexMap::new();
         let root = read_api_file(&path)?;
         let files = get_ref_files(&root)?;
         docs.insert(path.clone(), root);
+
         for file in files {
-            let doc_path = path::join(true, &path, &file)?;
+            let doc_path = path::join(&path, &file)?;
             let doc = read_api_file(&doc_path)?;
             docs.insert(doc_path, doc);
         }
@@ -77,7 +78,7 @@ impl Spec {
                 }
             }
             for (name, param) in &doc.parameters {
-                // println!("insert parameter {} {}", &file, &name);
+                // println!("insert parameter {} {}", &file, name);
                 parameters.insert(
                     RefKey {
                         file: file.clone(),
@@ -99,7 +100,7 @@ impl Spec {
         let rf = Reference::parse(reference)?;
         let file = match rf.file {
             None => doc_file.to_owned(),
-            Some(file) => path::join(true, doc_file, &file)?,
+            Some(file) => path::join(doc_file, &file)?,
         };
         match rf.name {
             None => Err(format!("no name in reference {}", &reference))?,
@@ -125,7 +126,7 @@ impl Spec {
         let rf = Reference::parse(reference)?;
         let file = match rf.file {
             None => doc_file.to_owned(),
-            Some(file) => path::join(true, doc_file, &file)?,
+            Some(file) => path::join(doc_file, &file)?,
         };
         match rf.name {
             None => Err(format!("no name in reference {}", &reference))?,
@@ -219,8 +220,7 @@ impl Spec {
 
 pub fn read_api_file<P: AsRef<Path>>(path: P) -> Result<OpenAPI> {
     let path = path.as_ref();
-    let mut bytes = Vec::new();
-    File::open(path)?.read_to_end(&mut bytes)?;
+    let bytes = fs::read(path)?;
     let api = if path.extension() == Some(OsStr::new("yaml"))
         || path.extension() == Some(OsStr::new("yml"))
     {
@@ -228,6 +228,7 @@ pub fn read_api_file<P: AsRef<Path>>(path: P) -> Result<OpenAPI> {
     } else {
         serde_json::from_slice(&bytes)?
     };
+
     Ok(api)
 }
 
@@ -342,7 +343,7 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
     }
 }
 
-/// returns a list of refs
+/// Returns the list of all refs for an OpenAPI schema
 pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
     let mut list = Vec::new();
 
@@ -350,7 +351,7 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
     for (_path, item) in &api.paths {
         match item {
             ReferenceOr::Reference { reference, .. } => {
-                list.push(RefString::PathItem(reference.to_owned()))
+                list.push(RefString::PathItem(reference.clone()))
             }
             ReferenceOr::Item(item) => {
                 for verb in pathitem_operations(&item) {
@@ -359,11 +360,11 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
                     for prm in &op.parameters {
                         match prm {
                             ReferenceOr::Reference { reference, .. } => {
-                                list.push(RefString::Parameter(reference.to_owned()))
+                                list.push(RefString::Parameter(reference.clone()))
                             }
                             ReferenceOr::Item(parameter) => match &parameter.schema {
                                 Some(ReferenceOr::Reference { reference, .. }) => {
-                                    list.push(RefString::Schema(reference.to_owned()))
+                                    list.push(RefString::Schema(reference.clone()))
                                 }
                                 Some(ReferenceOr::Item(schema)) => {
                                     add_refs_for_schema(&mut list, schema)
@@ -425,13 +426,8 @@ pub fn get_ref_files(api: &OpenAPI) -> Result<IndexSet<String>> {
 
     let mut set = IndexSet::new();
     for s in &ref_strings {
-        let rf = Reference::parse(s)?;
-        match rf.file {
-            Some(file) => {
-                set.insert(file);
-                ()
-            }
-            None => {}
+        if let Some(file) = Reference::parse(s)?.file {
+            set.insert(file);
         }
     }
 

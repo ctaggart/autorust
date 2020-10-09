@@ -16,20 +16,21 @@ fn main() -> Result<()> {
 
         // create models from schemas
         let models = cg.create_models()?;
-        let models_path = path::join(false, config.output_folder(), "models.rs")?;
-        write_file(&models, &models_path);
+        let models_path = path::join(config.output_folder(), "models.rs")?;
+        write_file(&models_path, &models)?;
 
         // create api client from operations
         let client = cg.create_client()?;
-        let client_path = path::join(false, &config.output_folder(), "client.rs")?;
-        write_file(&client, &client_path);
+        let client_path = path::join(&config.output_folder(), "client.rs")?;
+        write_file(&client_path, &client)?;
     }
     Ok(())
 }
 
-pub fn write_file(tokens: &TokenStream, path: &Path) {
-    println!("writing file {}", path.display());
+fn write_file<P: AsRef<Path>>(path: P, tokens: &TokenStream) -> Result<()> {
+    println!("writing file {}", path.as_ref().display());
     let code = format::format_code(tokens.to_string());
-    let mut buffer = File::create(path).unwrap();
-    buffer.write_all(&code.as_bytes()).unwrap();
+    let mut buffer = File::create(path)?;
+    buffer.write_all(&code.as_bytes())?;
+    Ok(())
 }
