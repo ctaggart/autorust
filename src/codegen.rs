@@ -82,8 +82,10 @@ impl CodeGen {
         struct_name: &str,
         schema: &ResolvedSchema,
     ) -> Result<Vec<TokenStream>> {
-        let mut streams = vec![];
+        let mut streams = Vec::new();
+        let mut local_types = Vec::new();
         let mut props = TokenStream::new();
+        let ns = ident(&struct_name.to_snake_case());
         let nm = ident(&struct_name.to_camel_case());
         let required: HashSet<&str> = schema.schema.required.iter().map(String::as_str).collect();
 
@@ -93,12 +95,12 @@ impl CodeGen {
         for (property_name, property) in &properties {
             let nm = ident(&property_name.to_snake_case());
             let (field_tp_name, field_tp) =
-                self.create_struct_field_type(doc_file, struct_name, property_name, property)?;
+                self.create_struct_field_type(&ns, property_name, property)?;
             let is_required = required.contains(property_name.as_str());
             let field_tp_name = require(is_required, field_tp_name);
 
             if let Some(field_tp) = field_tp {
-                streams.push(field_tp);
+                local_types.push(field_tp);
             }
             let skip_serialization_if = if is_required {
                 quote! {}
@@ -132,15 +134,26 @@ impl CodeGen {
             }
         };
         streams.push(TokenStream::from(st));
+
+        if local_types.len() > 0 {
+            let mut types = TokenStream::new();
+            local_types.into_iter().for_each(|tp| types.extend(tp));
+            streams.push(quote! {
+                mod #ns {
+                    use super::*;
+                    #types
+                }
+            });
+        }
+
         Ok(streams)
     }
 
     /// Creates the type reference for a struct field from a struct property.
-    /// Optionally, creates an inner struct for an enum or a private schema.
+    /// Optionally, creates an type for a local schema.
     fn create_struct_field_type(
         &self,
-        doc_file: &Path,
-        struct_name: &str,
+        namespace: &TokenStream,
         property_name: &str,
         property: &ResolvedSchema,
     ) -> Result<(TokenStream, Option<TokenStream>)> {
@@ -150,43 +163,36 @@ impl CodeGen {
                 Ok((tp, None))
             }
             None => {
-                let schema_type = property.schema.common.type_.as_ref();
-                let enum_values = enum_values_as_strings(&property.schema.common.enum_);
-                let mut enum_ts: Option<TokenStream> = None;
-                let tp = if enum_values.len() > 0 {
-                    enum_ts = Some(create_enum(struct_name, property_name, enum_values));
-                    let ns = ident(&struct_name.to_snake_case());
-                    let id = ident(&property_name.to_camel_case());
-                    TokenStream::from(quote! {#ns::#id})
+                if is_local_enum(property) {
+                    let (tp_name, tp) = create_enum(namespace, property_name, property);
+                    Ok((tp_name, Some(tp)))
                 } else {
-                    let unknown_type = quote!(UnknownType);
-                    if let Some(schema_type) = schema_type {
-                        let format = property.schema.common.format.as_deref();
-                        match schema_type {
-                            DataType::Array => {
-                                let items = get_schema_array_items(&property.schema)?;
-                                let vec_items_typ = get_type_for_schema(&items)?;
-                                quote! { Vec<#vec_items_typ> }
+                    let tp = {
+                        let unknown_type = quote!(UnknownType);
+                        let schema_type = property.schema.common.type_.as_ref();
+                        if let Some(schema_type) = schema_type {
+                            let format = property.schema.common.format.as_deref();
+                            match schema_type {
+                                DataType::Array => {
+                                    let items = get_schema_array_items(&property.schema)?;
+                                    let vec_items_typ = get_type_for_schema(&items)?;
+                                    quote! { Vec<#vec_items_typ> }
+                                }
+                                DataType::Integer if format == Some("int32") => quote! { i32 },
+                                DataType::Integer => quote! { i64 },
+                                DataType::Number if format == Some("float") => quote! { f32 },
+                                DataType::Number => quote! { f64 },
+                                DataType::String => quote! { String },
+                                DataType::Boolean => quote! { bool },
+                                DataType::Object => quote! { serde_json::Value },
                             }
-                            DataType::Integer if format == Some("int32") => quote! { i32 },
-                            DataType::Integer => quote! { i64 },
-                            DataType::Number if format == Some("float") => quote! { f32 },
-                            DataType::Number => quote! { f64 },
-                            DataType::String => quote! { String },
-                            DataType::Boolean => quote! { bool },
-                            DataType::Object => quote! { serde_json::Value },
+                        } else {
+                            eprintln!("UnknownType {}", property_name);
+                            unknown_type
                         }
-                    } else {
-                        eprintln!(
-                            "UnknownType {} {} {}",
-                            doc_file.display(),
-                            struct_name,
-                            property_name
-                        );
-                        unknown_type
-                    }
-                };
-                Ok((tp, enum_ts))
+                    };
+                    Ok((tp, None))
+                }
             }
         }
     }
@@ -270,9 +276,19 @@ fn is_keyword(word: &str) -> bool {
     )
 }
 
-fn create_enum(struct_name: &str, property_name: &str, enum_values: Vec<&str>) -> TokenStream {
-    let mut values = TokenStream::new();
+fn is_local_enum(property: &ResolvedSchema) -> bool {
+    property.schema.common.enum_.len() > 0
+}
 
+fn create_enum(
+    namespace: &TokenStream,
+    property_name: &str,
+    property: &ResolvedSchema,
+) -> (TokenStream, TokenStream) {
+    let schema_type = property.schema.common.type_.as_ref();
+    let enum_values = enum_values_as_strings(&property.schema.common.enum_);
+    let id = ident(&property_name.to_camel_case());
+    let mut values = TokenStream::new();
     enum_values.iter().for_each(|name| {
         let nm = ident(&name.to_camel_case());
         let rename = if &nm.to_string() == name {
@@ -286,21 +302,15 @@ fn create_enum(struct_name: &str, property_name: &str, enum_values: Vec<&str>) -
         };
         values.extend(value);
     });
-
-    let ns = ident(&struct_name.to_snake_case());
     let nm = ident(&property_name.to_camel_case());
-
-    let enm = quote! {
-        mod #ns {
-            use super::*;
-            #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-            pub enum #nm {
-                #values
-            }
+    let tp = quote! {
+        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+        pub enum #nm {
+            #values
         }
     };
-
-    TokenStream::from(enm)
+    let tp_name = quote! {#namespace::#id};
+    (tp_name, tp)
 }
 
 /// Wraps a type in an Option if is not required.
