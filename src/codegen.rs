@@ -1,28 +1,199 @@
 #![allow(unused_variables, dead_code)]
-use crate::{
-    format_code, pathitem_operations, OperationVerb, Reference, ResolvedSchema, Result, Spec,
-};
+use crate::{spec, OperationVerb, Reference, ResolvedSchema, Result, Spec};
 use autorust_openapi::{DataType, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use regex::Regex;
 use serde_json::Value;
-use std::{collections::HashSet, fs::File, io::prelude::*};
+use std::{collections::HashSet, path::Path};
 
 /// code generation context
 pub struct CodeGen {
     pub spec: Spec,
 }
-
-fn is_schema_an_array(schema: &ResolvedSchema) -> bool {
-    match &schema.schema.common.type_ {
-        Some(tp) => match tp {
-            DataType::Array => true,
-            _ => false,
-        },
-        None => false,
+impl CodeGen {
+    pub fn from_file<P: AsRef<Path>>(input_file: P) -> Result<Self> {
+        let spec = Spec::read_file(input_file)?;
+        Ok(Self { spec })
     }
+
+    pub fn create_models(&self) -> Result<TokenStream> {
+        let mut file = TokenStream::new();
+        file.extend(create_generated_by_header());
+        file.extend(quote! {
+            #![allow(non_camel_case_types)]
+            use crate::*;
+            use serde::{Deserialize, Serialize};
+        });
+        let (root_path, root_doc) = self.spec.docs.get_index(0).unwrap();
+        let schemas = &self
+            .spec
+            .resolve_schema_map(root_path, &root_doc.definitions)?;
+        for (name, schema) in schemas {
+            if is_schema_an_array(schema) {
+                file.extend(self.create_vec_alias(root_path, name, schema)?);
+            } else {
+                for stream in self.create_struct(root_path, name, schema)? {
+                    file.extend(stream);
+                }
+            }
+        }
+        Ok(file)
+    }
+
+    pub fn create_client(&self) -> Result<TokenStream> {
+        let mut file = TokenStream::new();
+        file.extend(create_generated_by_header());
+        file.extend(quote! {
+            #![allow(unused_mut)]
+            #![allow(unused_variables)]
+            use crate::*;
+            use anyhow::{Error, Result};
+        });
+        let param_re = Regex::new(r"\{(\w+)\}").unwrap();
+        let (doc_file, doc) = self.spec.root();
+        let paths = self.spec.resolve_path_map(doc_file, &doc.paths)?;
+        for (path, item) in &paths {
+            // println!("{}", path);
+            for op in spec::pathitem_operations(item) {
+                // println!("{:?}", op.operation_id);
+                file.extend(create_function(self, path, item, &op, &param_re))
+            }
+        }
+        Ok(file)
+    }
+
+    fn create_vec_alias(
+        &self,
+        doc_file: &Path,
+        alias_name: &str,
+        schema: &ResolvedSchema,
+    ) -> Result<TokenStream> {
+        let items = get_schema_array_items(&schema.schema)?;
+        let typ = ident(&alias_name.to_camel_case());
+        let items_typ = get_type_for_schema(&items)?;
+        Ok(quote! { pub type #typ = Vec<#items_typ>; })
+    }
+
+    fn create_struct(
+        &self,
+        doc_file: &Path,
+        struct_name: &str,
+        schema: &ResolvedSchema,
+    ) -> Result<Vec<TokenStream>> {
+        let mut streams = vec![];
+        let mut props = TokenStream::new();
+        let nm = ident(&struct_name.to_camel_case());
+        let required: HashSet<&str> = schema.schema.required.iter().map(String::as_str).collect();
+
+        let properties = self
+            .spec
+            .resolve_schema_map(doc_file, &schema.schema.properties)?;
+        for (property_name, property) in &properties {
+            let nm = ident(&property_name.to_snake_case());
+            let (field_tp_name, field_tp) =
+                self.create_struct_field_type(doc_file, struct_name, property_name, property)?;
+            let is_required = required.contains(property_name.as_str());
+            let field_tp_name = require(is_required, field_tp_name);
+
+            if let Some(field_tp) = field_tp {
+                streams.push(field_tp);
+            }
+            let skip_serialization_if = if is_required {
+                quote! {}
+            } else {
+                quote! {skip_serializing_if = "Option::is_none"}
+            };
+            let rename = if &nm.to_string() == property_name {
+                if is_required {
+                    quote! {}
+                } else {
+                    quote! {#[serde(#skip_serialization_if)]}
+                }
+            } else {
+                if is_required {
+                    quote! {#[serde(rename = #property_name)]}
+                } else {
+                    quote! {#[serde(rename = #property_name, #skip_serialization_if)]}
+                }
+            };
+            let prop = quote! {
+                #rename
+                #nm: #field_tp_name,
+            };
+            props.extend(prop);
+        }
+
+        let st = quote! {
+            #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+            pub struct #nm {
+                #props
+            }
+        };
+        streams.push(TokenStream::from(st));
+        Ok(streams)
+    }
+
+    /// Creates the type reference for a struct field from a struct property.
+    /// Optionally, creates an inner struct for an enum or a private schema.
+    fn create_struct_field_type(
+        &self,
+        doc_file: &Path,
+        struct_name: &str,
+        property_name: &str,
+        property: &ResolvedSchema,
+    ) -> Result<(TokenStream, Option<TokenStream>)> {
+        match &property.ref_key {
+            Some(ref_key) => {
+                let tp = ident(&ref_key.name.to_camel_case());
+                Ok((tp, None))
+            }
+            None => {
+                let schema_type = property.schema.common.type_.as_ref();
+                let enum_values = enum_values_as_strings(&property.schema.common.enum_);
+                let mut enum_ts: Option<TokenStream> = None;
+                let tp = if enum_values.len() > 0 {
+                    enum_ts = Some(create_enum(struct_name, property_name, enum_values));
+                    let ns = ident(&struct_name.to_snake_case());
+                    let id = ident(&property_name.to_camel_case());
+                    TokenStream::from(quote! {#ns::#id})
+                } else {
+                    let unknown_type = quote!(UnknownType);
+                    if let Some(schema_type) = schema_type {
+                        let format = property.schema.common.format.as_deref();
+                        match schema_type {
+                            DataType::Array => {
+                                let items = get_schema_array_items(&property.schema)?;
+                                let vec_items_typ = get_type_for_schema(&items)?;
+                                quote! { Vec<#vec_items_typ> }
+                            }
+                            DataType::Integer if format == Some("int32") => quote! { i32 },
+                            DataType::Integer => quote! { i64 },
+                            DataType::Number if format == Some("float") => quote! { f32 },
+                            DataType::Number => quote! { f64 },
+                            DataType::String => quote! { String },
+                            DataType::Boolean => quote! { bool },
+                            DataType::Object => quote! { serde_json::Value },
+                        }
+                    } else {
+                        eprintln!(
+                            "UnknownType {} {} {}",
+                            doc_file.display(),
+                            struct_name,
+                            property_name
+                        );
+                        unknown_type
+                    }
+                };
+                Ok((tp, enum_ts))
+            }
+        }
+    }
+}
+
+fn is_schema_an_array(schema: &spec::ResolvedSchema) -> bool {
+    matches!(&schema.schema.common.type_, Some(DataType::Array))
 }
 
 fn get_schema_array_items(schema: &Schema) -> Result<&ReferenceOr<Schema>> {
@@ -40,42 +211,63 @@ fn create_generated_by_header() -> TokenStream {
     quote! { #![doc = #comment] }
 }
 
-pub fn create_models(cg: &CodeGen) -> Result<TokenStream> {
-    let mut file = TokenStream::new();
-    file.extend(create_generated_by_header());
-    file.extend(quote! {
-        #![allow(non_camel_case_types)]
-        use crate::*;
-        use serde::{Deserialize, Serialize};
-    });
-    let (root_path, root_doc) = cg.spec.docs.get_index(0).unwrap();
-    let schemas = &cg
-        .spec
-        .resolve_schema_map(root_path, &root_doc.definitions)?;
-    for (name, schema) in schemas {
-        if is_schema_an_array(schema) {
-            file.extend(create_vec_alias(cg, root_path, name, schema)?);
-        } else {
-            for stream in create_struct(cg, root_path, name, schema)? {
-                file.extend(stream);
-            }
-        }
-    }
-    Ok(file)
-}
-
 fn is_keyword(word: &str) -> bool {
-    match word {
+    matches!(
+        word,
         // https://doc.rust-lang.org/grammar.html#keywords
-        "abstract" | "alignof" | "as" | "become" | "box" | "break" | "const" | "continue"
-        | "crate" | "do" | "else" | "enum" | "extern" | "false" | "final" | "fn" | "for" | "if"
-        | "impl" | "in" | "let" | "loop" | "macro" | "match" | "mod" | "move" | "mut"
-        | "offsetof" | "override" | "priv" | "proc" | "pub" | "pure" | "ref" | "return"
-        | "Self" | "self" | "sizeof" | "static" | "struct" | "super" | "trait" | "true"
-        | "type" | "typeof" | "unsafe" | "unsized" | "use" | "virtual" | "where" | "while"
-        | "yield" => true,
-        _ => false,
-    }
+        "abstract"
+            | "alignof"
+            | "as"
+            | "become"
+            | "box"
+            | "break"
+            | "const"
+            | "continue"
+            | "crate"
+            | "do"
+            | "else"
+            | "enum"
+            | "extern"
+            | "false"
+            | "final"
+            | "fn"
+            | "for"
+            | "if"
+            | "impl"
+            | "in"
+            | "let"
+            | "loop"
+            | "macro"
+            | "match"
+            | "mod"
+            | "move"
+            | "mut"
+            | "offsetof"
+            | "override"
+            | "priv"
+            | "proc"
+            | "pub"
+            | "pure"
+            | "ref"
+            | "return"
+            | "Self"
+            | "self"
+            | "sizeof"
+            | "static"
+            | "struct"
+            | "super"
+            | "trait"
+            | "true"
+            | "type"
+            | "typeof"
+            | "unsafe"
+            | "unsized"
+            | "use"
+            | "virtual"
+            | "where"
+            | "while"
+            | "yield"
+    )
 }
 
 fn create_enum(struct_name: &str, property_name: &str, enum_values: Vec<&str>) -> TokenStream {
@@ -86,7 +278,7 @@ fn create_enum(struct_name: &str, property_name: &str, enum_values: Vec<&str>) -
         let rename = if &nm.to_string() == name {
             quote! {}
         } else {
-            quote! {#[serde(rename = #name)]}
+            quote! { #[serde(rename = #name)] }
         };
         let value = quote! {
             #rename
@@ -116,68 +308,7 @@ fn require(is_required: bool, tp: TokenStream) -> TokenStream {
     if is_required {
         tp
     } else {
-        quote! {Option<#tp>}
-    }
-}
-
-/// Creates the type reference for a struct field from a struct property.
-/// Optionally, creates an inner struct for an enum or a private schema.
-fn create_struct_field_type(
-    cg: &CodeGen,
-    doc_file: &str,
-    struct_name: &str,
-    property_name: &str,
-    property: &ResolvedSchema,
-) -> Result<(TokenStream, Option<TokenStream>)> {
-    match &property.ref_key {
-        Some(ref_key) => {
-            let tp = ident(&ref_key.name.to_camel_case());
-            Ok((tp, None))
-        }
-        None => {
-            let schema_type = property.schema.common.type_.as_ref();
-            let enum_values = enum_values_as_strings(&property.schema.common.enum_);
-            let mut enum_ts: Option<TokenStream> = None;
-            let tp = if enum_values.len() > 0 {
-                enum_ts = Some(create_enum(struct_name, property_name, enum_values));
-                let ns = ident(&struct_name.to_snake_case());
-                let id = ident(&property_name.to_camel_case());
-                TokenStream::from(quote! {#ns::#id})
-            } else {
-                let unknown_type = quote!(UnknownType);
-                if let Some(schema_type) = schema_type {
-                    let format = property.schema.common.format.as_deref();
-                    match schema_type {
-                        DataType::Array => {
-                            let items = get_schema_array_items(&property.schema)?;
-                            let vec_items_typ = get_type_for_schema(&items)?;
-                            quote! {Vec<#vec_items_typ>}
-                        }
-                        DataType::Integer => {
-                            if format == Some("int32") {
-                                quote! {i32}
-                            } else {
-                                quote! {i64}
-                            }
-                        }
-                        DataType::Number => {
-                            if format == Some("float") {
-                                quote! {f32}
-                            } else {
-                                quote! {f64}
-                            }
-                        }
-                        DataType::String => quote! {String},
-                        DataType::Boolean => quote! {bool},
-                        DataType::Object => quote! {serde_json::Value},
-                    }
-                } else {
-                    eprintln!("UnknownType {} {} {}", doc_file, struct_name, property_name);
-                    unknown_type
-                }
-            };
-            Ok((tp, enum_ts))
-        }
+        quote! { Option<#tp> }
     }
 }
 
@@ -197,95 +328,16 @@ fn ident(text: &str) -> TokenStream {
 }
 
 fn enum_values_as_strings(values: &Vec<Value>) -> Vec<&str> {
-    let mut strings = Vec::new();
-    for v in values {
-        match v {
-            Value::String(s) => strings.push(s.as_str()),
-            _ => {}
-        }
-    }
-    strings
+    values
+        .iter()
+        .filter_map(|v| match v {
+            Value::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// example: pub type Pets = Vec<Pet>;
-fn create_vec_alias(
-    cg: &CodeGen,
-    doc_file: &str,
-    alias_name: &str,
-    schema: &ResolvedSchema,
-) -> Result<TokenStream> {
-    let items = get_schema_array_items(&schema.schema)?;
-    let typ = ident(&alias_name.to_camel_case());
-    let items_typ = get_type_for_schema(&items)?;
-    Ok(quote! { pub type #typ = Vec<#items_typ>; })
-}
-
-fn create_struct(
-    cg: &CodeGen,
-    doc_file: &str,
-    struct_name: &str,
-    schema: &ResolvedSchema,
-) -> Result<Vec<TokenStream>> {
-    let mut streams = vec![];
-    let mut props = TokenStream::new();
-    let nm = ident(&struct_name.to_camel_case());
-    let required: HashSet<&str> = schema.schema.required.iter().map(String::as_str).collect();
-
-    let properties = cg
-        .spec
-        .resolve_schema_map(doc_file, &schema.schema.properties)?;
-    for (property_name, property) in &properties {
-        let nm = ident(&property_name.to_snake_case());
-        let (field_tp_name, field_tp) =
-            create_struct_field_type(cg, doc_file, struct_name, property_name, property)?;
-        let is_required = required.contains(property_name.as_str());
-        let field_tp_name = require(is_required, field_tp_name);
-
-        if let Some(field_tp) = field_tp {
-            streams.push(field_tp);
-        }
-        let skip_serialization_if = if is_required {
-            quote! {}
-        } else {
-            quote! {skip_serializing_if = "Option::is_none"}
-        };
-        let rename = if &nm.to_string() == property_name {
-            if is_required {
-                quote! {}
-            } else {
-                quote! {#[serde(#skip_serialization_if)]}
-            }
-        } else {
-            if is_required {
-                quote! {#[serde(rename = #property_name)]}
-            } else {
-                quote! {#[serde(rename = #property_name, #skip_serialization_if)]}
-            }
-        };
-        let prop = quote! {
-            #rename
-            #nm: #field_tp_name,
-        };
-        props.extend(prop);
-    }
-
-    let st = quote! {
-        #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-        pub struct #nm {
-            #props
-        }
-    };
-    streams.push(TokenStream::from(st));
-    Ok(streams)
-}
-
-pub fn write_file(tokens: &TokenStream, path: &str) {
-    println!("writing file {}", path);
-    let code = format_code(tokens.to_string());
-    let mut buffer = File::create(path).unwrap();
-    buffer.write_all(&code.as_bytes()).unwrap();
-}
-
 fn trim_ref(path: &str) -> String {
     let pos = path.rfind('/').map_or(0, |i| i + 1);
     path[pos..].to_string()
@@ -296,9 +348,7 @@ fn map_type(param_type: &DataType) -> TokenStream {
     match param_type {
         DataType::String => quote! { &str },
         DataType::Integer => quote! { i64 },
-        _ => {
-            quote! {map_type} // TODO may be Err instead
-        }
+        _ => quote! { map_type }, // TODO may be Err instead
     }
 }
 
@@ -479,28 +529,6 @@ fn create_function(
         }
     };
     Ok(TokenStream::from(func))
-}
-
-pub fn create_client(cg: &CodeGen) -> Result<TokenStream> {
-    let mut file = TokenStream::new();
-    file.extend(create_generated_by_header());
-    file.extend(quote! {
-        #![allow(unused_mut)]
-        #![allow(unused_variables)]
-        use crate::*;
-        use anyhow::{Error, Result};
-    });
-    let param_re = Regex::new(r"\{(\w+)\}").unwrap();
-    let (doc_file, doc) = cg.spec.root();
-    let paths = cg.spec.resolve_path_map(doc_file, &doc.paths)?;
-    for (path, item) in &paths {
-        // println!("{}", path);
-        for op in pathitem_operations(item) {
-            // println!("{:?}", op.operation_id);
-            file.extend(create_function(cg, path, item, &op, &param_re))
-        }
-    }
-    Ok(file)
 }
 
 #[cfg(test)]

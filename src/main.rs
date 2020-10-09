@@ -1,25 +1,35 @@
-use autorust_codegen::{
-    create_client, create_models, new_app, new_config, path_join, write_file, CodeGen, Result, Spec,
+mod cli;
+
+use autorust_codegen::{format, path, CodeGen, Result};
+use proc_macro2::TokenStream;
+use std::{
+    fs::{self, File},
+    io::prelude::*,
+    path::Path,
 };
-use std::fs::create_dir_all;
 
 fn main() -> Result<()> {
-    let arg_matches = new_app().get_matches();
-    let config = new_config(&arg_matches)?;
-    create_dir_all(&config.output_folder)?;
-    for input_file in &config.input_files {
-        let spec = Spec::read_file(input_file)?;
-        let cg = &CodeGen { spec };
+    let config = cli::Config::try_new()?;
+    fs::create_dir_all(config.output_folder())?;
+    for input_file in config.input_files() {
+        let cg = &CodeGen::from_file(input_file)?;
 
         // create models from schemas
-        let models = create_models(cg)?;
-        let models_path = path_join(false, &config.output_folder, "models.rs")?;
+        let models = cg.create_models()?;
+        let models_path = path::join(false, config.output_folder(), "models.rs")?;
         write_file(&models, &models_path);
 
         // create api client from operations
-        let client = create_client(cg)?;
-        let client_path = path_join(false, &config.output_folder, "client.rs")?;
+        let client = cg.create_client()?;
+        let client_path = path::join(false, &config.output_folder(), "client.rs")?;
         write_file(&client, &client_path);
     }
     Ok(())
+}
+
+pub fn write_file(tokens: &TokenStream, path: &Path) {
+    println!("writing file {}", path.display());
+    let code = format::format_code(tokens.to_string());
+    let mut buffer = File::create(path).unwrap();
+    buffer.write_all(&code.as_bytes()).unwrap();
 }

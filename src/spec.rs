@@ -1,22 +1,27 @@
-use crate::{path_join, Reference, Result};
+use crate::{path, Reference, Result};
 use autorust_openapi::{
     AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema,
 };
 use indexmap::{IndexMap, IndexSet};
-use std::{ffi::OsStr, fs::File, io::prelude::*, path::Path};
+use std::{
+    ffi::OsStr,
+    fs::File,
+    io::prelude::*,
+    path::{Path, PathBuf},
+};
 
 #[derive(Clone, Debug)]
 pub struct Spec {
     /// multiple documents for an API specification
     /// the first one is the root
-    pub docs: IndexMap<String, OpenAPI>,
+    pub docs: IndexMap<PathBuf, OpenAPI>,
     schemas: IndexMap<RefKey, Schema>,
     parameters: IndexMap<RefKey, Parameter>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RefKey {
-    pub file: String,
+    pub file: PathBuf,
     pub name: String,
 }
 
@@ -26,26 +31,29 @@ pub struct ResolvedSchema {
 }
 
 impl Spec {
-    pub fn root(&self) -> (&str, &OpenAPI) {
+    pub fn root(&self) -> (&Path, &OpenAPI) {
         let (file, doc) = self.docs.get_index(0).unwrap();
         (file, doc)
     }
-    pub fn root_file(&self) -> &str {
+
+    pub fn root_file(&self) -> &Path {
         let (file, _doc) = self.root();
         file
     }
+
     pub fn root_doc(&self) -> &OpenAPI {
         let (_file, doc) = self.root();
         doc
     }
 
-    pub fn read_file(path: &str) -> Result<Self> {
+    pub fn read_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref().to_owned();
         let mut docs = IndexMap::new();
-        let root = read_api_file(path)?;
+        let root = read_api_file(&path)?;
         let files = get_ref_files(&root)?;
-        docs.insert(path.to_owned(), root);
+        docs.insert(path.clone(), root);
         for file in files {
-            let doc_path = path_join(true, path, &file)?;
+            let doc_path = path::join(true, &path, &file)?;
             let doc = read_api_file(&doc_path)?;
             docs.insert(doc_path, doc);
         }
@@ -87,11 +95,11 @@ impl Spec {
         })
     }
 
-    pub fn resolve_schema_ref(&self, doc_file: &str, reference: &str) -> Result<ResolvedSchema> {
+    pub fn resolve_schema_ref(&self, doc_file: &Path, reference: &str) -> Result<ResolvedSchema> {
         let rf = Reference::parse(reference)?;
         let file = match rf.file {
             None => doc_file.to_owned(),
-            Some(file) => path_join(true, doc_file, &file)?,
+            Some(file) => path::join(true, doc_file, &file)?,
         };
         match rf.name {
             None => Err(format!("no name in reference {}", &reference))?,
@@ -103,7 +111,7 @@ impl Spec {
                 let schema = self
                     .schemas
                     .get(&ref_key)
-                    .ok_or_else(|| format!("schema not found {} {}", &file, &nm))?
+                    .ok_or_else(|| format!("schema not found {} {}", &file.display(), &nm))?
                     .clone();
                 Ok(ResolvedSchema {
                     ref_key: Some(ref_key),
@@ -113,11 +121,11 @@ impl Spec {
         }
     }
 
-    pub fn resolve_parameter_ref(&self, doc_file: &str, reference: &str) -> Result<Parameter> {
+    pub fn resolve_parameter_ref(&self, doc_file: &Path, reference: &str) -> Result<Parameter> {
         let rf = Reference::parse(reference)?;
         let file = match rf.file {
             None => doc_file.to_owned(),
-            Some(file) => path_join(true, doc_file, &file)?,
+            Some(file) => path::join(true, doc_file, &file)?,
         };
         match rf.name {
             None => Err(format!("no name in reference {}", &reference))?,
@@ -127,14 +135,14 @@ impl Spec {
                     file: file.clone(),
                     name: nm.clone(),
                 })
-                .ok_or_else(|| format!("parameter not found {} {}", &file, &nm))?
+                .ok_or_else(|| format!("parameter not found {} {}", &file.display(), &nm))?
                 .clone()),
         }
     }
 
     pub fn resolve_schema(
         &self,
-        doc_file: &str,
+        doc_file: &Path,
         schema: &ReferenceOr<Schema>,
     ) -> Result<ResolvedSchema> {
         match schema {
@@ -150,7 +158,7 @@ impl Spec {
 
     pub fn resolve_schema_map(
         &self,
-        doc_file: &str,
+        doc_file: &Path,
         schemas: &IndexMap<String, ReferenceOr<Schema>>,
     ) -> Result<IndexMap<String, ResolvedSchema>> {
         let mut resolved = IndexMap::new();
@@ -160,7 +168,7 @@ impl Spec {
         Ok(resolved)
     }
 
-    pub fn resolve_path(&self, _doc_file: &str, path: &ReferenceOr<PathItem>) -> Result<PathItem> {
+    pub fn resolve_path(&self, _doc_file: &Path, path: &ReferenceOr<PathItem>) -> Result<PathItem> {
         match path {
             ReferenceOr::Item(path) => Ok(path.clone()),
             ReferenceOr::Reference { .. } =>
@@ -173,7 +181,7 @@ impl Spec {
 
     pub fn resolve_path_map(
         &self,
-        doc_file: &str,
+        doc_file: &Path,
         paths: &IndexMap<String, ReferenceOr<PathItem>>,
     ) -> Result<IndexMap<String, PathItem>> {
         let mut resolved = IndexMap::new();
@@ -185,7 +193,7 @@ impl Spec {
 
     pub fn resolve_parameter(
         &self,
-        doc_file: &str,
+        doc_file: &Path,
         parameter: &ReferenceOr<Parameter>,
     ) -> Result<Parameter> {
         match parameter {
@@ -198,7 +206,7 @@ impl Spec {
 
     pub fn resolve_parameters(
         &self,
-        doc_file: &str,
+        doc_file: &Path,
         parameters: &Vec<ReferenceOr<Parameter>>,
     ) -> Result<Vec<Parameter>> {
         let mut resolved = Vec::new();
