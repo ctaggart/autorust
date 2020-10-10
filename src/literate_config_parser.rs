@@ -45,6 +45,12 @@ pub(crate) fn parse_configs_from_literate_config(config_cmark_content: &str) -> 
                 serde_yaml::from_str(&code_block).expect("TODO(PR)");
             configuration.tag = extract_configuration_tag_from_heading_node(node);
             configurations.push(configuration);
+        } else {
+            let node_data = node.data.borrow();
+            if matches!(node_data.value, NodeValue::Heading(NodeHeading { level, .. }) if level == 2) {
+                // Encountered another heading of level 2 - stop traversal.
+                break;
+            }
         }
         current_node = node.next_sibling();
     }
@@ -228,5 +234,36 @@ input-file:
 ```
 ";
         assert!(parse_configs_from_literate_config(invalid_input).is_empty());
+    }
+
+    #[test]
+    fn should_ignore_code_blocks_after_configuration_heading() {
+        let input = "
+## Configuration
+
+### Tag: package-2019-06
+
+These settings apply only when `--tag=package-2019-06` is specified on the command line.
+
+``` yaml $(tag) == 'package-2019-06'
+input-file:
+- Microsoft.Storage/stable/2019-06-01/storage.json
+```
+
+## DIFFERENT HEADING
+
+### Tag: package-2020-01-01
+
+These settings apply only when `--tag=package-2020-01-01` is specified on the command line.
+
+``` yaml $(tag) == 'package-2020-01-01'
+input-file:
+- Microsoft.Storage/stable/2020-01-01-01/storage.json
+```
+";
+
+        let configurations = parse_configs_from_literate_config(input);
+        assert_eq!(1, configurations.len());
+        assert_eq!("2019-06", configurations[0].tag);
     }
 }
