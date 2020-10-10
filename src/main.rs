@@ -11,19 +11,17 @@ use std::{
 fn main() -> Result<()> {
     let config = cli::Config::try_new()?;
     fs::create_dir_all(config.output_folder())?;
-    for input_file in config.input_files() {
-        let cg = &CodeGen::from_file(input_file)?;
+    let cg = &CodeGen::from_files(config.input_files())?;
 
-        // create models from schemas
-        let models = cg.create_models()?;
-        let models_path = path::join(config.output_folder(), "models.rs")?;
-        write_file(&models_path, &models)?;
+    // create models from schemas
+    let models = cg.create_models()?;
+    let models_path = path::join(config.output_folder(), "models.rs")?;
+    write_file(&models_path, &models)?;
 
-        // create api client from operations
-        let client = cg.create_client()?;
-        let client_path = path::join(&config.output_folder(), "client.rs")?;
-        write_file(&client_path, &client)?;
-    }
+    // create api client from operations
+    let client = cg.create_client()?;
+    let client_path = path::join(&config.output_folder(), "client.rs")?;
+    write_file(&client_path, &client)?;
     Ok(())
 }
 

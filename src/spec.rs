@@ -16,6 +16,7 @@ pub struct Spec {
     pub docs: IndexMap<PathBuf, OpenAPI>,
     schemas: IndexMap<RefKey, Schema>,
     parameters: IndexMap<RefKey, Parameter>,
+    input_files: IndexSet<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -30,33 +31,24 @@ pub struct ResolvedSchema {
 }
 
 impl Spec {
-    pub fn root(&self) -> (&Path, &OpenAPI) {
-        let (file, doc) = self.docs.get_index(0).unwrap();
-        (file, doc)
+    pub fn is_input_file<P: AsRef<Path>>(&self, path: P) -> bool {
+        self.input_files.contains(path.as_ref())
     }
 
-    pub fn root_file(&self) -> &Path {
-        let (file, _doc) = self.root();
-        file
-    }
+    pub fn read_files<P: AsRef<Path>>(input_files: &[P]) -> Result<Self> {
+        let mut docs: IndexMap<PathBuf, OpenAPI> = IndexMap::new();
+        for input_file in input_files {
+            let doc = read_api_file(&input_file)?;
+            let files = get_ref_files(&doc)?;
+            docs.insert(input_file.as_ref().to_owned(), doc);
 
-    pub fn root_doc(&self) -> &OpenAPI {
-        let (_file, doc) = self.root();
-        doc
-    }
-
-    pub fn read_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref().to_owned();
-
-        let mut docs = IndexMap::new();
-        let root = read_api_file(&path)?;
-        let files = get_ref_files(&root)?;
-        docs.insert(path.clone(), root);
-
-        for file in files {
-            let doc_path = path::join(&path, &file)?;
-            let doc = read_api_file(&doc_path)?;
-            docs.insert(doc_path, doc);
+            for file in files {
+                let doc_path = path::join(&input_file, &file)?;
+                if !docs.contains_key(&doc_path) {
+                    let doc = read_api_file(&doc_path)?;
+                    docs.insert(doc_path, doc);
+                }
+            }
         }
 
         let mut schemas: IndexMap<RefKey, Schema> = IndexMap::new();
@@ -93,6 +85,7 @@ impl Spec {
             docs,
             schemas,
             parameters,
+            input_files: input_files.iter().map(|f| f.as_ref().to_owned()).collect(),
         })
     }
 
@@ -430,6 +423,15 @@ pub fn get_ref_files(api: &OpenAPI) -> Result<IndexSet<String>> {
             set.insert(file);
         }
     }
-
     Ok(set)
+}
+
+pub fn get_schema_refs(api: &OpenAPI) -> Vec<String> {
+    get_refs(api)
+        .iter()
+        .filter_map(|rf| match rf {
+            RefString::Schema(rs) => Some(rs.to_owned()),
+            _ => None,
+        })
+        .collect()
 }
