@@ -73,12 +73,6 @@ impl CodeGen {
         for (doc_file, doc) in &self.spec.docs {
             if self.spec.is_input_file(doc_file) {
                 for rf in get_api_schema_refs(doc) {
-                    // let schema = self.spec.resolve_schema_ref(doc_file, &rf)?;
-                    // if let Some(ref_key) = &schema.ref_key {
-                    //     if !self.spec.is_input_file(&ref_key.file) {
-                    //         all_schemas.insert(ref_key.clone(), schema);
-                    //     }
-                    // }
                     self.add_schema_refs(&mut all_schemas, doc_file, &rf)?;
                 }
             }
