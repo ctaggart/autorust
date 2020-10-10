@@ -137,7 +137,6 @@ impl CodeGen {
         for schema in &schema.schema.all_of {
             let type_name = get_type_name_for_schema_ref(schema)?;
             let field_name = ident(&type_name.to_string().to_snake_case());
-            // let type_name = get_type_name_for_schema(&schema.schema)?;
             props.extend(quote! {
                 #[serde(flatten)]
                 pub #field_name: #type_name,
