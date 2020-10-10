@@ -7,11 +7,7 @@ pub fn format_code(unformatted: String) -> String {
         verbosity: rustfmt_nightly::emitter::Verbosity::Quiet,
         ..rustfmt_nightly::OperationSetting::default()
     };
-    match rustfmt_nightly::format(
-        rustfmt_nightly::Input::Text(unformatted.clone()),
-        &config,
-        setting,
-    ) {
+    match rustfmt_nightly::format(rustfmt_nightly::Input::Text(unformatted.clone()), &config, setting) {
         Ok(report) => match report.format_result().next() {
             Some((_, format_result)) => {
                 let formatted = format_result.formatted_text();

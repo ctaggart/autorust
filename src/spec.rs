@@ -1,7 +1,5 @@
 use crate::{path, Reference, Result};
-use autorust_openapi::{
-    AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema,
-};
+use autorust_openapi::{AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use indexmap::{IndexMap, IndexSet};
 use std::{
     ffi::OsStr,
@@ -134,20 +132,22 @@ impl Spec {
         }
     }
 
-    pub fn resolve_schema(
-        &self,
-        doc_file: &Path,
-        schema: &ReferenceOr<Schema>,
-    ) -> Result<ResolvedSchema> {
+    pub fn resolve_schema(&self, doc_file: &Path, schema: &ReferenceOr<Schema>) -> Result<ResolvedSchema> {
         match schema {
             ReferenceOr::Item(schema) => Ok(ResolvedSchema {
                 ref_key: None,
                 schema: schema.clone(),
             }),
-            ReferenceOr::Reference { reference, .. } => {
-                self.resolve_schema_ref(doc_file, reference)
-            }
+            ReferenceOr::Reference { reference, .. } => self.resolve_schema_ref(doc_file, reference),
         }
+    }
+
+    pub fn resolve_schemas(&self, doc_file: &Path, schemas: &Vec<ReferenceOr<Schema>>) -> Result<Vec<ResolvedSchema>> {
+        let mut resolved = Vec::new();
+        for schema in schemas {
+            resolved.push(self.resolve_schema(doc_file, schema)?);
+        }
+        Ok(resolved)
     }
 
     pub fn resolve_schema_map(
@@ -173,11 +173,7 @@ impl Spec {
         }
     }
 
-    pub fn resolve_path_map(
-        &self,
-        doc_file: &Path,
-        paths: &IndexMap<String, ReferenceOr<PathItem>>,
-    ) -> Result<IndexMap<String, PathItem>> {
+    pub fn resolve_path_map(&self, doc_file: &Path, paths: &IndexMap<String, ReferenceOr<PathItem>>) -> Result<IndexMap<String, PathItem>> {
         let mut resolved = IndexMap::new();
         for (name, path) in paths {
             resolved.insert(name.clone(), self.resolve_path(doc_file, path)?);
@@ -185,24 +181,14 @@ impl Spec {
         Ok(resolved)
     }
 
-    pub fn resolve_parameter(
-        &self,
-        doc_file: &Path,
-        parameter: &ReferenceOr<Parameter>,
-    ) -> Result<Parameter> {
+    pub fn resolve_parameter(&self, doc_file: &Path, parameter: &ReferenceOr<Parameter>) -> Result<Parameter> {
         match parameter {
             ReferenceOr::Item(param) => Ok(param.clone()),
-            ReferenceOr::Reference { reference, .. } => {
-                self.resolve_parameter_ref(doc_file, reference)
-            }
+            ReferenceOr::Reference { reference, .. } => self.resolve_parameter_ref(doc_file, reference),
         }
     }
 
-    pub fn resolve_parameters(
-        &self,
-        doc_file: &Path,
-        parameters: &Vec<ReferenceOr<Parameter>>,
-    ) -> Result<Vec<Parameter>> {
+    pub fn resolve_parameters(&self, doc_file: &Path, parameters: &Vec<ReferenceOr<Parameter>>) -> Result<Vec<Parameter>> {
         let mut resolved = Vec::new();
         for param in parameters {
             resolved.push(self.resolve_parameter(doc_file, param)?);
@@ -214,9 +200,7 @@ impl Spec {
 pub fn read_api_file<P: AsRef<Path>>(path: P) -> Result<OpenAPI> {
     let path = path.as_ref();
     let bytes = fs::read(path)?;
-    let api = if path.extension() == Some(OsStr::new("yaml"))
-        || path.extension() == Some(OsStr::new("yml"))
-    {
+    let api = if path.extension() == Some(OsStr::new("yaml")) || path.extension() == Some(OsStr::new("yml")) {
         serde_yaml::from_slice(&bytes)?
     } else {
         serde_json::from_slice(&bytes)?
@@ -299,9 +283,7 @@ impl ToString for RefString {
 fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
     for (_, schema) in &schema.properties {
         match schema {
-            ReferenceOr::Reference { reference, .. } => {
-                list.push(RefString::Schema(reference.to_owned()))
-            }
+            ReferenceOr::Reference { reference, .. } => list.push(RefString::Schema(reference.to_owned())),
             ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
         }
     }
@@ -309,9 +291,7 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
         Some(ap) => match ap {
             AdditionalProperties::Boolean(_) => {}
             AdditionalProperties::Schema(schema) => match schema {
-                ReferenceOr::Reference { reference, .. } => {
-                    list.push(RefString::Schema(reference.to_owned()))
-                }
+                ReferenceOr::Reference { reference, .. } => list.push(RefString::Schema(reference.to_owned())),
                 ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
             },
         },
@@ -319,18 +299,14 @@ fn add_refs_for_schema(list: &mut Vec<RefString>, schema: &Schema) {
     }
     match schema.common.items.as_ref() {
         Some(schema) => match schema {
-            ReferenceOr::Reference { reference, .. } => {
-                list.push(RefString::Schema(reference.to_owned()))
-            }
+            ReferenceOr::Reference { reference, .. } => list.push(RefString::Schema(reference.to_owned())),
             ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
         },
         _ => {}
     }
     for schema in &schema.all_of {
         match schema {
-            ReferenceOr::Reference { reference, .. } => {
-                list.push(RefString::Schema(reference.to_owned()))
-            }
+            ReferenceOr::Reference { reference, .. } => list.push(RefString::Schema(reference.to_owned())),
             ReferenceOr::Item(schema) => add_refs_for_schema(list, schema),
         }
     }
@@ -343,25 +319,17 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
     // paths and operations
     for (_path, item) in &api.paths {
         match item {
-            ReferenceOr::Reference { reference, .. } => {
-                list.push(RefString::PathItem(reference.clone()))
-            }
+            ReferenceOr::Reference { reference, .. } => list.push(RefString::PathItem(reference.clone())),
             ReferenceOr::Item(item) => {
                 for verb in pathitem_operations(&item) {
                     let op = verb.operation();
                     // parameters
                     for prm in &op.parameters {
                         match prm {
-                            ReferenceOr::Reference { reference, .. } => {
-                                list.push(RefString::Parameter(reference.clone()))
-                            }
+                            ReferenceOr::Reference { reference, .. } => list.push(RefString::Parameter(reference.clone())),
                             ReferenceOr::Item(parameter) => match &parameter.schema {
-                                Some(ReferenceOr::Reference { reference, .. }) => {
-                                    list.push(RefString::Schema(reference.clone()))
-                                }
-                                Some(ReferenceOr::Item(schema)) => {
-                                    add_refs_for_schema(&mut list, schema)
-                                }
+                                Some(ReferenceOr::Reference { reference, .. }) => list.push(RefString::Schema(reference.clone())),
+                                Some(ReferenceOr::Item(schema)) => add_refs_for_schema(&mut list, schema),
                                 None => {}
                             },
                         }
@@ -370,12 +338,8 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
                     // responses
                     for (_code, rsp) in &op.responses {
                         match &rsp.schema {
-                            Some(ReferenceOr::Reference { reference, .. }) => {
-                                list.push(RefString::Schema(reference.to_owned()))
-                            }
-                            Some(ReferenceOr::Item(schema)) => {
-                                add_refs_for_schema(&mut list, schema)
-                            }
+                            Some(ReferenceOr::Reference { reference, .. }) => list.push(RefString::Schema(reference.to_owned())),
+                            Some(ReferenceOr::Item(schema)) => add_refs_for_schema(&mut list, schema),
                             None => {}
                         }
                     }
@@ -383,9 +347,7 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
                     // examples
                     for (_name, example) in &op.x_ms_examples {
                         match example {
-                            ReferenceOr::Reference { reference, .. } => {
-                                list.push(RefString::Example(reference.to_owned()))
-                            }
+                            ReferenceOr::Reference { reference, .. } => list.push(RefString::Example(reference.to_owned())),
                             _ => {}
                         }
                     }
@@ -397,9 +359,7 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
     // definitions
     for (_name, schema) in &api.definitions {
         match schema {
-            ReferenceOr::Reference { reference, .. } => {
-                list.push(RefString::Schema(reference.to_owned()))
-            }
+            ReferenceOr::Reference { reference, .. } => list.push(RefString::Schema(reference.to_owned())),
             ReferenceOr::Item(schema) => add_refs_for_schema(&mut list, schema),
         }
     }
