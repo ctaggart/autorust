@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use comrak::{
     nodes::{AstNode, NodeCodeBlock, NodeHeading, NodeValue},
     parse_document, Arena, ComrakOptions,
@@ -22,9 +24,25 @@ pub(crate) struct Configuration {
 
 /// Receives the configurations for all tags/versions from the received
 /// [Literate Configuration](http://azure.github.io/autorest/user/literate-file-formats/configuration.html) [CommonMark](https://commonmark.org/) file.
-pub(crate) fn parse_configs_from_literate(config_cmark_content: &str) -> Vec<Configuration> {
+pub(crate) fn parse_configurations_from_autorest_config_file(
+    config_file: PathBuf,
+) -> Vec<Configuration> {
+    let extension = config_file.extension().expect(&format!("Received AutoRest configuration file did not contain an expected extension (e.g. '.md'): '{0}'", config_file.as_path().to_str().unwrap()));
+    let extension = extension.to_str().unwrap();
+    match extension.to_lowercase().as_str() {
+        "md" => {
+            let cmark_content = std::fs::read_to_string(config_file).expect("Unexpected error when reading the received CommonMark configuration file");
+            parse_configurations_from_cmark_config(&cmark_content)
+        },
+        _ => panic!(format!("Received AutoRest configuration extension not supported: '{0}' (in configuration file '{1}')", extension, config_file.as_path().to_str().unwrap()))
+    }
+}
+
+/// Receives the configurations for all tags/versions from the received
+/// [Literate Configuration](http://azure.github.io/autorest/user/literate-file-formats/configuration.html) [CommonMark](https://commonmark.org/) file.
+fn parse_configurations_from_cmark_config(cmark_content: &str) -> Vec<Configuration> {
     let arena = Arena::new();
-    let root = parse_document(&arena, &config_cmark_content, &ComrakOptions::default());
+    let root = parse_document(&arena, &cmark_content, &ComrakOptions::default());
 
     // Get the AST node corresponding with "## Configuration".
     let configuration_heading_node = get_configuration_section_heading_node(root)
@@ -49,7 +67,8 @@ pub(crate) fn parse_configs_from_literate(config_cmark_content: &str) -> Vec<Con
             configurations.push(configuration);
         } else {
             let node_data = node.data.borrow();
-            if matches!(node_data.value, NodeValue::Heading(NodeHeading { level, .. }) if level == 2) {
+            if matches!(node_data.value, NodeValue::Heading(NodeHeading { level, .. }) if level == 2)
+            {
                 // Encountered another heading of level 2 - stop traversal.
                 break;
             }
@@ -141,7 +160,7 @@ input-file:
 - Microsoft.Storage/stable/2019-06-01/table.json
 ```
 ";
-        let configurations = parse_configs_from_literate(input);
+        let configurations = parse_configurations_from_cmark_config(input);
         assert_eq!(1, configurations.len());
         assert_eq!("2019-06", configurations[0].tag);
         assert_eq!(5, configurations[0].input_files.len());
@@ -182,7 +201,7 @@ input-file:
 - Microsoft.Storage/preview/2015-05-01-preview/storage.json
 ```
 ";
-        let configurations = parse_configs_from_literate(input);
+        let configurations = parse_configurations_from_cmark_config(input);
         assert_eq!(2, configurations.len());
         assert_eq!("2019-06", configurations[0].tag);
         assert_eq!(5, configurations[0].input_files.len());
@@ -218,7 +237,7 @@ input-file:
 - Microsoft.Storage/stable/2019-06-01/storage.json
 ```
 ";
-        parse_configs_from_literate(invalid_input);
+parse_configurations_from_cmark_config(invalid_input);
     }
 
     #[test]
@@ -235,7 +254,7 @@ input-file:
 - Microsoft.Storage/stable/2019-06-01/storage.json
 ```
 ";
-        assert!(parse_configs_from_literate(invalid_input).is_empty());
+        assert!(parse_configurations_from_cmark_config(invalid_input).is_empty());
     }
 
     #[test]
@@ -264,7 +283,7 @@ input-file:
 ```
 ";
 
-        let configurations = parse_configs_from_literate(input);
+        let configurations = parse_configurations_from_cmark_config(input);
         assert_eq!(1, configurations.len());
         assert_eq!("2019-06", configurations[0].tag);
     }
