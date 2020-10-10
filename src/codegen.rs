@@ -21,12 +21,7 @@ impl CodeGen {
     }
 
     // For create_models. Recursively adds schema refs.
-    fn add_schema_refs(
-        &self,
-        schemas: &mut IndexMap<RefKey, ResolvedSchema>,
-        doc_file: &Path,
-        schema_ref: &str,
-    ) -> Result<()> {
+    fn add_schema_refs(&self, schemas: &mut IndexMap<RefKey, ResolvedSchema>, doc_file: &Path, schema_ref: &str) -> Result<()> {
         let schema = self.spec.resolve_schema_ref(doc_file, schema_ref)?;
         if let Some(ref_key) = schema.ref_key.clone() {
             if !schemas.contains_key(&ref_key) {
@@ -123,24 +118,14 @@ impl CodeGen {
         Ok(file)
     }
 
-    fn create_vec_alias(
-        &self,
-        doc_file: &Path,
-        alias_name: &str,
-        schema: &ResolvedSchema,
-    ) -> Result<TokenStream> {
+    fn create_vec_alias(&self, doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
         let items = get_schema_array_items(&schema.schema)?;
         let typ = ident(&alias_name.to_camel_case());
         let items_typ = get_type_name_for_schema_ref(&items)?;
         Ok(quote! { pub type #typ = Vec<#items_typ>; })
     }
 
-    fn create_struct(
-        &self,
-        doc_file: &Path,
-        struct_name: &str,
-        schema: &ResolvedSchema,
-    ) -> Result<Vec<TokenStream>> {
+    fn create_struct(&self, doc_file: &Path, struct_name: &str, schema: &ResolvedSchema) -> Result<Vec<TokenStream>> {
         // println!("create_struct {} {}", doc_file.to_str().unwrap(), struct_name);
         let mut streams = Vec::new();
         let mut local_types = Vec::new();
@@ -149,13 +134,19 @@ impl CodeGen {
         let nm = ident(&struct_name.to_camel_case());
         let required: HashSet<&str> = schema.schema.required.iter().map(String::as_str).collect();
 
-        let properties = self
-            .spec
-            .resolve_schema_map(doc_file, &schema.schema.properties)?;
+        for schema in &schema.schema.all_of {
+            let type_name = get_type_name_for_schema_ref(schema)?;
+            let field_name = ident(&type_name.to_string().to_snake_case());
+            props.extend(quote! {
+                #[serde(flatten)]
+                pub #field_name: #type_name,
+            });
+        }
+
+        let properties = self.spec.resolve_schema_map(doc_file, &schema.schema.properties)?;
         for (property_name, property) in &properties {
             let nm = ident(&property_name.to_snake_case());
-            let (field_tp_name, field_tp) =
-                self.create_struct_field_type(doc_file, &ns, property_name, property)?;
+            let (field_tp_name, field_tp) = self.create_struct_field_type(doc_file, &ns, property_name, property)?;
             let is_required = required.contains(property_name.as_str());
             let field_tp_name = require(is_required, field_tp_name);
 
@@ -180,11 +171,10 @@ impl CodeGen {
                     quote! {#[serde(rename = #property_name, #skip_serialization_if)]}
                 }
             };
-            let prop = quote! {
+            props.extend(quote! {
                 #rename
-                #nm: #field_tp_name,
-            };
-            props.extend(prop);
+                pub #nm: #field_tp_name,
+            });
         }
 
         let st = quote! {
@@ -326,11 +316,7 @@ fn is_local_struct(property: &ResolvedSchema) -> bool {
     property.schema.properties.len() > 0
 }
 
-fn create_enum(
-    namespace: &TokenStream,
-    property_name: &str,
-    property: &ResolvedSchema,
-) -> (TokenStream, TokenStream) {
+fn create_enum(namespace: &TokenStream, property_name: &str, property: &ResolvedSchema) -> (TokenStream, TokenStream) {
     let schema_type = property.schema.common.type_.as_ref();
     let enum_values = enum_values_as_strings(&property.schema.common.enum_);
     let id = ident(&property_name.to_camel_case());
@@ -429,11 +415,7 @@ fn get_param_name_and_type(param: &Parameter) -> Result<TokenStream> {
 fn parse_params(param_re: &Regex, path: &str) -> Vec<String> {
     // capture 0 is the whole match and 1 is the actual capture like other languages
     // param_re.find_iter(path).into_iter().map(|m| m.as_str().to_string()).collect()
-    param_re
-        .captures_iter(path)
-        .into_iter()
-        .map(|c| c[1].to_string())
-        .collect()
+    param_re.captures_iter(path).into_iter().map(|c| c[1].to_string()).collect()
 }
 
 fn format_path(param_re: &Regex, path: &str) -> String {
@@ -492,11 +474,7 @@ fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>) -> Result<TokenStr
     match schema {
         ReferenceOr::Reference { reference, .. } => {
             let rf = Reference::parse(&reference)?;
-            let idt = ident(
-                &rf.name
-                    .ok_or_else(|| format!("no name for ref {}", reference))?
-                    .to_camel_case(),
-            );
+            let idt = ident(&rf.name.ok_or_else(|| format!("no name for ref {}", reference))?.to_camel_case());
             Ok(quote! { #idt })
         }
         ReferenceOr::Item(schema) => get_type_name_for_schema(schema),
@@ -519,10 +497,7 @@ fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
 /// Creating a function name from the path and verb when an operationId is not specified.
 /// All azure-rest-api-specs operations should have an operationId.
 fn create_function_name(path: &str, verb_name: &str) -> String {
-    let mut path = path
-        .split('/')
-        .filter(|&x| !x.is_empty())
-        .collect::<Vec<_>>();
+    let mut path = path.split('/').filter(|&x| !x.is_empty()).collect::<Vec<_>>();
     path.push(verb_name);
     path.join("_")
 }
