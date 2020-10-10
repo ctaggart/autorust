@@ -7,7 +7,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use regex::Regex;
 use serde_json::Value;
-use spec::{get_schema_refs, RefKey};
+use spec::{get_api_schema_refs, get_schema_schema_refs, RefKey};
 use std::{collections::HashSet, path::Path};
 
 /// code generation context
@@ -20,11 +20,34 @@ impl CodeGen {
         Ok(Self { spec })
     }
 
+    // For create_models. Recursively adds schema refs.
+    fn add_schema_refs(
+        &self,
+        schemas: &mut IndexMap<RefKey, ResolvedSchema>,
+        doc_file: &Path,
+        schema_ref: &str,
+    ) -> Result<()> {
+        let schema = self.spec.resolve_schema_ref(doc_file, schema_ref)?;
+        if let Some(ref_key) = schema.ref_key.clone() {
+            if !schemas.contains_key(&ref_key) {
+                if !self.spec.is_input_file(&ref_key.file) {
+                    let refs = get_schema_schema_refs(&schema.schema);
+                    schemas.insert(ref_key.clone(), schema);
+                    for rf in refs {
+                        self.add_schema_refs(schemas, &ref_key.file, &rf)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn create_models(&self) -> Result<TokenStream> {
         let mut file = TokenStream::new();
         file.extend(create_generated_by_header());
         file.extend(quote! {
             #![allow(non_camel_case_types)]
+            #![allow(unused_imports)]
             use crate::*;
             use serde::{Deserialize, Serialize};
         });
@@ -49,13 +72,14 @@ impl CodeGen {
         // any referenced schemas from other files
         for (doc_file, doc) in &self.spec.docs {
             if self.spec.is_input_file(doc_file) {
-                for rf in get_schema_refs(doc) {
-                    let schema = self.spec.resolve_schema_ref(doc_file, &rf)?;
-                    if let Some(ref_key) = &schema.ref_key {
-                        if !self.spec.is_input_file(&ref_key.file) {
-                            all_schemas.insert(ref_key.clone(), schema);
-                        }
-                    }
+                for rf in get_api_schema_refs(doc) {
+                    // let schema = self.spec.resolve_schema_ref(doc_file, &rf)?;
+                    // if let Some(ref_key) = &schema.ref_key {
+                    //     if !self.spec.is_input_file(&ref_key.file) {
+                    //         all_schemas.insert(ref_key.clone(), schema);
+                    //     }
+                    // }
+                    self.add_schema_refs(&mut all_schemas, doc_file, &rf)?;
                 }
             }
         }
@@ -452,7 +476,10 @@ fn get_type_name_for_schema(schema: &Schema) -> Result<TokenStream> {
         };
         Ok(ts)
     } else {
-        eprintln!("unknown type in get_type_name_for_schema {:#?}", schema);
+        eprintln!(
+            "WARN unknown type in get_type_name_for_schema, description {:?}",
+            schema.common.description
+        );
         Ok(quote! {serde_json::Value})
     }
 }

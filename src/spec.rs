@@ -426,9 +426,20 @@ pub fn get_ref_files(api: &OpenAPI) -> Result<IndexSet<String>> {
     Ok(set)
 }
 
-pub fn get_schema_refs(api: &OpenAPI) -> Vec<String> {
+pub fn get_api_schema_refs(api: &OpenAPI) -> Vec<String> {
     get_refs(api)
         .iter()
+        .filter_map(|rf| match rf {
+            RefString::Schema(rs) => Some(rs.to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn get_schema_schema_refs(schema: &Schema) -> Vec<String> {
+    let mut refs = Vec::new();
+    add_refs_for_schema(&mut refs, schema);
+    refs.iter()
         .filter_map(|rf| match rf {
             RefString::Schema(rs) => Some(rs.to_owned()),
             _ => None,
