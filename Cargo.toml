@@ -17,6 +17,7 @@ autorust_openapi = { git = "https://github.com/ctaggart/autorust_openapi" }
 # autorust_openapi = { path = "../autorust_openapi" }
 quote = "*"
 proc-macro2 = { version = "*", default-features = false }
+serde = "1.0"
 serde_json = "*"
 serde_yaml = "*"
 heck = "*"
@@ -24,6 +25,7 @@ regex = "*"
 indexmap = {version = "*", features = ["serde-1"]}
 path_abs = "*"
 clap = "3.0.0-beta.2"
+comrak = "0.8"
 rustfmt-nightly = { git = "https://github.com/rust-lang/rustfmt", optional = true }
 
 [features]

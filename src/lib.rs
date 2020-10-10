@@ -1,7 +1,8 @@
 mod codegen;
+mod reference;
+mod literate_config_parser;
 pub mod format;
 pub mod path;
-mod reference;
 pub mod spec;
 
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
