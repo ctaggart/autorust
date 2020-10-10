@@ -461,7 +461,8 @@ fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>) -> Result<TokenStr
             let rf = Reference::parse(&reference)?;
             let idt = ident(
                 &rf.name
-                    .ok_or_else(|| format!("no name for ref {}", reference))?,
+                    .ok_or_else(|| format!("no name for ref {}", reference))?
+                    .to_camel_case(),
             );
             Ok(quote! { #idt })
         }
