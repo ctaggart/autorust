@@ -22,17 +22,19 @@ pub(crate) struct Configuration {
 
 /// Receives the configurations for all tags/versions from the received
 /// [Literate Configuration](http://azure.github.io/autorest/user/literate-file-formats/configuration.html) [CommonMark](https://commonmark.org/) file.
-pub(crate) fn parse_configs_from_literate_config(config_cmark_content: &str) -> Vec<Configuration> {
+pub(crate) fn parse_configs_from_literate(config_cmark_content: &str) -> Vec<Configuration> {
     let arena = Arena::new();
     let root = parse_document(&arena, &config_cmark_content, &ComrakOptions::default());
 
-    let configuration_heading_node = get_configuration_section_heading_node(root);
+    // Get the AST node corresponding with "## Configuration".
+    let configuration_heading_node = get_configuration_section_heading_node(root)
+        .expect("No `## Configuration` heading in the AutoRest literate configuration file");
 
     let mut configurations = Vec::new();
 
-    let mut current_node = configuration_heading_node
-        .expect("No `## Configuration` heading in the AutoRest literate configuration file")
-        .next_sibling();
+    // Traverse all next AST nodes until next level-2 heading node (e.g. "## Another Heading"),
+    // in search of level-3 headings representing tags (e.g. "### Tag: package-2020-01") to parse the configuration from.
+    let mut current_node = configuration_heading_node.next_sibling();
     while let Some(node) = current_node {
         if is_configuration_tag_heading_node(node) {
             // Extract the configuration from the first node inside the tag heading ("Tag: ..."),
@@ -139,7 +141,7 @@ input-file:
 - Microsoft.Storage/stable/2019-06-01/table.json
 ```
 ";
-        let configurations = parse_configs_from_literate_config(input);
+        let configurations = parse_configs_from_literate(input);
         assert_eq!(1, configurations.len());
         assert_eq!("2019-06", configurations[0].tag);
         assert_eq!(5, configurations[0].input_files.len());
@@ -180,7 +182,7 @@ input-file:
 - Microsoft.Storage/preview/2015-05-01-preview/storage.json
 ```
 ";
-        let configurations = parse_configs_from_literate_config(input);
+        let configurations = parse_configs_from_literate(input);
         assert_eq!(2, configurations.len());
         assert_eq!("2019-06", configurations[0].tag);
         assert_eq!(5, configurations[0].input_files.len());
@@ -216,7 +218,7 @@ input-file:
 - Microsoft.Storage/stable/2019-06-01/storage.json
 ```
 ";
-        parse_configs_from_literate_config(invalid_input);
+        parse_configs_from_literate(invalid_input);
     }
 
     #[test]
@@ -233,7 +235,7 @@ input-file:
 - Microsoft.Storage/stable/2019-06-01/storage.json
 ```
 ";
-        assert!(parse_configs_from_literate_config(invalid_input).is_empty());
+        assert!(parse_configs_from_literate(invalid_input).is_empty());
     }
 
     #[test]
@@ -262,7 +264,7 @@ input-file:
 ```
 ";
 
-        let configurations = parse_configs_from_literate_config(input);
+        let configurations = parse_configs_from_literate(input);
         assert_eq!(1, configurations.len());
         assert_eq!("2019-06", configurations[0].tag);
     }
