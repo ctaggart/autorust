@@ -48,11 +48,13 @@ impl CodeGen {
 
         // any referenced schemas from other files
         for (doc_file, doc) in &self.spec.docs {
-            for rf in get_schema_refs(doc) {
-                let schema = self.spec.resolve_schema_ref(doc_file, &rf)?;
-                if !self.spec.is_input_file(doc_file) {
+            if self.spec.is_input_file(doc_file) {
+                for rf in get_schema_refs(doc) {
+                    let schema = self.spec.resolve_schema_ref(doc_file, &rf)?;
                     if let Some(ref_key) = &schema.ref_key {
-                        all_schemas.insert(ref_key.clone(), schema);
+                        if !self.spec.is_input_file(&ref_key.file) {
+                            all_schemas.insert(ref_key.clone(), schema);
+                        }
                     }
                 }
             }
