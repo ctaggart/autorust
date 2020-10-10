@@ -155,7 +155,7 @@ impl CodeGen {
         for (property_name, property) in &properties {
             let nm = ident(&property_name.to_snake_case());
             let (field_tp_name, field_tp) =
-                self.create_struct_field_type(&ns, property_name, property)?;
+                self.create_struct_field_type(doc_file, &ns, property_name, property)?;
             let is_required = required.contains(property_name.as_str());
             let field_tp_name = require(is_required, field_tp_name);
 
@@ -213,6 +213,7 @@ impl CodeGen {
     /// Optionally, creates a type for a local schema.
     fn create_struct_field_type(
         &self,
+        doc_file: &Path,
         namespace: &TokenStream,
         property_name: &str,
         property: &ResolvedSchema,
@@ -226,6 +227,11 @@ impl CodeGen {
                 if is_local_enum(property) {
                     let (tp_name, tp) = create_enum(namespace, property_name, property);
                     Ok((tp_name, Some(tp)))
+                } else if is_local_struct(property) {
+                    let id = ident(&property_name.to_camel_case());
+                    let tp_name = quote! {#namespace::#id};
+                    let tps = self.create_struct(doc_file, property_name, property)?;
+                    Ok((tp_name, Some(tps[0].clone())))
                 } else {
                     Ok((get_type_name_for_schema(&property.schema)?, None))
                 }
@@ -314,6 +320,10 @@ fn is_keyword(word: &str) -> bool {
 
 fn is_local_enum(property: &ResolvedSchema) -> bool {
     property.schema.common.enum_.len() > 0
+}
+
+fn is_local_struct(property: &ResolvedSchema) -> bool {
+    property.schema.properties.len() > 0
 }
 
 fn create_enum(
