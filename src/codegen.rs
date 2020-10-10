@@ -2,10 +2,12 @@
 use crate::{spec, OperationVerb, Reference, ResolvedSchema, Result, Spec};
 use autorust_openapi::{DataType, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
+use indexmap::IndexMap;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use regex::Regex;
 use serde_json::Value;
+use spec::{get_api_schema_refs, get_schema_schema_refs, RefKey};
 use std::{collections::HashSet, path::Path};
 
 /// code generation context
@@ -13,9 +15,31 @@ pub struct CodeGen {
     pub spec: Spec,
 }
 impl CodeGen {
-    pub fn from_file<P: AsRef<Path>>(input_file: P) -> Result<Self> {
-        let spec = Spec::read_file(input_file)?;
+    pub fn from_files<P: AsRef<Path>>(input_files: &[P]) -> Result<Self> {
+        let spec = Spec::read_files(input_files)?;
         Ok(Self { spec })
+    }
+
+    // For create_models. Recursively adds schema refs.
+    fn add_schema_refs(
+        &self,
+        schemas: &mut IndexMap<RefKey, ResolvedSchema>,
+        doc_file: &Path,
+        schema_ref: &str,
+    ) -> Result<()> {
+        let schema = self.spec.resolve_schema_ref(doc_file, schema_ref)?;
+        if let Some(ref_key) = schema.ref_key.clone() {
+            if !schemas.contains_key(&ref_key) {
+                if !self.spec.is_input_file(&ref_key.file) {
+                    let refs = get_schema_schema_refs(&schema.schema);
+                    schemas.insert(ref_key.clone(), schema);
+                    for rf in refs {
+                        self.add_schema_refs(schemas, &ref_key.file, &rf)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn create_models(&self) -> Result<TokenStream> {
@@ -23,19 +47,53 @@ impl CodeGen {
         file.extend(create_generated_by_header());
         file.extend(quote! {
             #![allow(non_camel_case_types)]
+            #![allow(unused_imports)]
             use crate::*;
             use serde::{Deserialize, Serialize};
         });
-        let (root_path, root_doc) = self.spec.docs.get_index(0).unwrap();
-        let schemas = &self
-            .spec
-            .resolve_schema_map(root_path, &root_doc.definitions)?;
-        for (name, schema) in schemas {
-            if is_schema_an_array(schema) {
-                file.extend(self.create_vec_alias(root_path, name, schema)?);
+        let mut all_schemas: IndexMap<RefKey, ResolvedSchema> = IndexMap::new();
+
+        // all definitions from input_files
+        for (doc_file, doc) in &self.spec.docs {
+            if self.spec.is_input_file(doc_file) {
+                let schemas = self.spec.resolve_schema_map(doc_file, &doc.definitions)?;
+                for (name, schema) in schemas {
+                    all_schemas.insert(
+                        RefKey {
+                            file: doc_file.to_owned(),
+                            name,
+                        },
+                        schema,
+                    );
+                }
+            }
+        }
+
+        // any referenced schemas from other files
+        for (doc_file, doc) in &self.spec.docs {
+            if self.spec.is_input_file(doc_file) {
+                for rf in get_api_schema_refs(doc) {
+                    self.add_schema_refs(&mut all_schemas, doc_file, &rf)?;
+                }
+            }
+        }
+
+        let mut schema_names = IndexMap::new();
+        for (ref_key, schema) in &all_schemas {
+            let doc_file = &ref_key.file;
+            let schema_name = &ref_key.name;
+            if let Some(first_doc_file) = schema_names.insert(schema_name, doc_file) {
+                eprintln!(
+                    "WARN schema {} already created from {:?}, duplicate from {:?}",
+                    schema_name, first_doc_file, doc_file
+                );
             } else {
-                for stream in self.create_struct(root_path, name, schema)? {
-                    file.extend(stream);
+                if is_schema_an_array(schema) {
+                    file.extend(self.create_vec_alias(doc_file, schema_name, schema)?);
+                } else {
+                    for stream in self.create_struct(doc_file, schema_name, schema)? {
+                        file.extend(stream);
+                    }
                 }
             }
         }
@@ -52,13 +110,14 @@ impl CodeGen {
             use anyhow::{Error, Result};
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
-        let (doc_file, doc) = self.spec.root();
-        let paths = self.spec.resolve_path_map(doc_file, &doc.paths)?;
-        for (path, item) in &paths {
-            // println!("{}", path);
-            for op in spec::pathitem_operations(item) {
-                // println!("{:?}", op.operation_id);
-                file.extend(create_function(self, path, item, &op, &param_re))
+        for (doc_file, doc) in &self.spec.docs {
+            let paths = self.spec.resolve_path_map(doc_file, &doc.paths)?;
+            for (path, item) in &paths {
+                // println!("{}", path);
+                for op in spec::pathitem_operations(item) {
+                    // println!("{:?}", op.operation_id);
+                    file.extend(create_function(self, doc_file, path, item, &op, &param_re))
+                }
             }
         }
         Ok(file)
@@ -72,7 +131,7 @@ impl CodeGen {
     ) -> Result<TokenStream> {
         let items = get_schema_array_items(&schema.schema)?;
         let typ = ident(&alias_name.to_camel_case());
-        let items_typ = get_type_for_schema(&items)?;
+        let items_typ = get_type_name_for_schema_ref(&items)?;
         Ok(quote! { pub type #typ = Vec<#items_typ>; })
     }
 
@@ -82,6 +141,7 @@ impl CodeGen {
         struct_name: &str,
         schema: &ResolvedSchema,
     ) -> Result<Vec<TokenStream>> {
+        // println!("create_struct {} {}", doc_file.to_str().unwrap(), struct_name);
         let mut streams = Vec::new();
         let mut local_types = Vec::new();
         let mut props = TokenStream::new();
@@ -150,7 +210,7 @@ impl CodeGen {
     }
 
     /// Creates the type reference for a struct field from a struct property.
-    /// Optionally, creates an type for a local schema.
+    /// Optionally, creates a type for a local schema.
     fn create_struct_field_type(
         &self,
         namespace: &TokenStream,
@@ -167,31 +227,7 @@ impl CodeGen {
                     let (tp_name, tp) = create_enum(namespace, property_name, property);
                     Ok((tp_name, Some(tp)))
                 } else {
-                    let tp = {
-                        let unknown_type = quote!(UnknownType);
-                        let schema_type = property.schema.common.type_.as_ref();
-                        if let Some(schema_type) = schema_type {
-                            let format = property.schema.common.format.as_deref();
-                            match schema_type {
-                                DataType::Array => {
-                                    let items = get_schema_array_items(&property.schema)?;
-                                    let vec_items_typ = get_type_for_schema(&items)?;
-                                    quote! { Vec<#vec_items_typ> }
-                                }
-                                DataType::Integer if format == Some("int32") => quote! { i32 },
-                                DataType::Integer => quote! { i64 },
-                                DataType::Number if format == Some("float") => quote! { f32 },
-                                DataType::Number => quote! { f64 },
-                                DataType::String => quote! { String },
-                                DataType::Boolean => quote! { bool },
-                                DataType::Object => quote! { serde_json::Value },
-                            }
-                        } else {
-                            eprintln!("UnknownType {}", property_name);
-                            unknown_type
-                        }
-                    };
-                    Ok((tp, None))
+                    Ok((get_type_name_for_schema(&property.schema)?, None))
                 }
             }
         }
@@ -367,7 +403,7 @@ fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     if let Some(param_type) = &param.common.type_ {
         Ok(map_type(param_type))
     } else if let Some(schema) = &param.schema {
-        Ok(get_type_for_schema(schema)?)
+        Ok(get_type_name_for_schema_ref(schema)?)
     } else {
         let idt = ident("NoParamType1");
         Ok(quote! { #idt }) // TOOD may be Err instead
@@ -394,8 +430,7 @@ fn format_path(param_re: &Regex, path: &str) -> String {
     param_re.replace_all(path, "{}").to_string()
 }
 
-fn create_function_params(cg: &CodeGen, op: &Operation) -> Result<TokenStream> {
-    let doc_file = cg.spec.root_file(); // TODO pass in
+fn create_function_params(cg: &CodeGen, doc_file: &Path, op: &Operation) -> Result<TokenStream> {
     let parameters: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &op.parameters)?;
     let mut params: Vec<TokenStream> = Vec::new();
     for param in &parameters {
@@ -406,51 +441,55 @@ fn create_function_params(cg: &CodeGen, op: &Operation) -> Result<TokenStream> {
     Ok(quote! { #(#params),* })
 }
 
-fn get_type_for_schema(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
+fn get_type_name_for_schema(schema: &Schema) -> Result<TokenStream> {
+    if let Some(schema_type) = &schema.common.type_ {
+        let format = schema.common.format.as_deref();
+        let ts = match schema_type {
+            DataType::Array => {
+                let items = get_schema_array_items(schema)?;
+                let vec_items_typ = get_type_name_for_schema_ref(&items)?;
+                quote! {Vec<#vec_items_typ>}
+            }
+            DataType::Integer => {
+                if format == Some("int32") {
+                    quote! {i32}
+                } else {
+                    quote! {i64}
+                }
+            }
+            DataType::Number => {
+                if format == Some("float") {
+                    quote! {f32}
+                } else {
+                    quote! {f64}
+                }
+            }
+            DataType::String => quote! {String},
+            DataType::Boolean => quote! {bool},
+            DataType::Object => quote! {serde_json::Value},
+        };
+        Ok(ts)
+    } else {
+        eprintln!(
+            "WARN unknown type in get_type_name_for_schema, description {:?}",
+            schema.common.description
+        );
+        Ok(quote! {serde_json::Value})
+    }
+}
+
+fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
     match schema {
         ReferenceOr::Reference { reference, .. } => {
             let rf = Reference::parse(&reference)?;
             let idt = ident(
                 &rf.name
-                    .ok_or_else(|| format!("no name for ref {}", reference))?,
+                    .ok_or_else(|| format!("no name for ref {}", reference))?
+                    .to_camel_case(),
             );
             Ok(quote! { #idt })
         }
-        ReferenceOr::Item(schema) => {
-            if let Some(schema_type) = &schema.common.type_ {
-                let format = schema.common.format.as_deref();
-                let ts = match schema_type {
-                    DataType::Array => {
-                        let items = get_schema_array_items(schema)?;
-                        let vec_items_typ = get_type_for_schema(&items)?;
-                        quote! {Vec<#vec_items_typ>}
-                    }
-                    DataType::Integer => {
-                        if format == Some("int32") {
-                            quote! {i32}
-                        } else {
-                            quote! {i64}
-                        }
-                    }
-                    DataType::Number => {
-                        if format == Some("float") {
-                            quote! {f32}
-                        } else {
-                            quote! {f64}
-                        }
-                    }
-                    DataType::String => quote! {String},
-                    DataType::Boolean => quote! {bool},
-                    DataType::Object => quote! {serde_json::Value},
-                };
-                return Ok(ts);
-            }
-
-            // TODO probably need to create a struct
-            // and have a way to name it
-            let idt = ident("NoParamType2");
-            Ok(quote! { #idt })
-        }
+        ReferenceOr::Item(schema) => get_type_name_for_schema(schema),
     }
 }
 
@@ -460,7 +499,7 @@ fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
     for (_http_code, rsp) in verb.operation().responses.iter() {
         // println!("response key {:#?} {:#?}", key, rsp);
         if let Some(schema) = &rsp.schema {
-            let tp = get_type_for_schema(schema)?;
+            let tp = get_type_name_for_schema_ref(schema)?;
             return Ok(quote! { Result<#tp> });
         }
     }
@@ -480,6 +519,7 @@ fn create_function_name(path: &str, verb_name: &str) -> String {
 
 fn create_function(
     cg: &CodeGen,
+    doc_file: &Path,
     path: &str,
     item: &PathItem,
     operation_verb: &OperationVerb,
@@ -504,7 +544,7 @@ fn create_function(
 
     // get path parameters
     // Option if not required
-    let fparams = create_function_params(cg, operation_verb.operation())?;
+    let fparams = create_function_params(cg, doc_file, operation_verb.operation())?;
 
     // see if there is a body parameter
     let fresponse = create_function_return(operation_verb)?;
