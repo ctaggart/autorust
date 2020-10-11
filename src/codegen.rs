@@ -1,5 +1,5 @@
 #![allow(unused_variables, dead_code)]
-use crate::{spec, OperationVerb, Reference, ResolvedSchema, Result, Spec};
+use crate::{spec, Config, OperationVerb, Reference, ResolvedSchema, Result, Spec};
 use autorust_openapi::{DataType, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
@@ -8,16 +8,33 @@ use quote::{format_ident, quote, ToTokens};
 use regex::Regex;
 use serde_json::Value;
 use spec::{get_api_schema_refs, get_schema_schema_refs, RefKey};
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 /// code generation context
 pub struct CodeGen {
+    config: Config,
     pub spec: Spec,
 }
+
 impl CodeGen {
-    pub fn from_files<P: AsRef<Path>>(input_files: &[P]) -> Result<Self> {
-        let spec = Spec::read_files(input_files)?;
-        Ok(Self { spec })
+    pub fn new(config: Config) -> Result<Self> {
+        let spec = Spec::read_files(&config.input_files)?;
+        Ok(Self { config, spec })
+    }
+
+    pub fn input_files(&self) -> &[PathBuf] {
+        &self.config.input_files
+    }
+
+    pub fn output_folder(&self) -> &Path {
+        &self.config.output_folder
+    }
+
+    pub fn api_version(&self) -> Option<&str> {
+        self.config.api_version.as_deref()
     }
 
     // For create_models. Recursively adds schema refs.
@@ -85,6 +102,10 @@ impl CodeGen {
             } else {
                 if is_schema_an_array(schema) {
                     file.extend(self.create_vec_alias(doc_file, schema_name, schema)?);
+                } else if is_local_enum(schema) {
+                    let no_namespace = TokenStream::new();
+                    let (_tp_name, tp) = create_enum(&no_namespace, schema_name, schema);
+                    file.extend(tp);
                 } else {
                     for stream in self.create_struct(doc_file, schema_name, schema)? {
                         file.extend(stream);
@@ -426,8 +447,14 @@ fn format_path(param_re: &Regex, path: &str) -> String {
 fn create_function_params(cg: &CodeGen, doc_file: &Path, op: &Operation) -> Result<TokenStream> {
     let parameters: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &op.parameters)?;
     let mut params: Vec<TokenStream> = Vec::new();
+    let mut skip = HashSet::new();
+    if cg.api_version().is_some() {
+        skip.insert("api-version");
+    }
     for param in &parameters {
-        params.push(get_param_name_and_type(param)?);
+        if !skip.contains(param.name.as_str()) {
+            params.push(get_param_name_and_type(param)?);
+        }
     }
     let slf = quote! { configuration: &Configuration };
     params.insert(0, slf);
@@ -527,9 +554,6 @@ fn create_function(
     let uri_str_args = quote! { #(#params),* };
 
     let fpath = format!("{{}}{}", &format_path(param_re, path));
-
-    // get path parameters
-    // Option if not required
     let fparams = create_function_params(cg, doc_file, operation_verb.operation())?;
 
     // see if there is a body parameter
@@ -545,6 +569,15 @@ fn create_function(
         OperationVerb::Head(_) => quote! { client.head(uri_str) },
     };
 
+    let mut ts_request_builder = TokenStream::new();
+    if let Some(api_version) = cg.api_version() {
+        ts_request_builder.extend(quote! {
+            if let Some(token) = &configuration.bearer_access_token {
+                req_builder = req_builder.query(&[("api-version", &configuration.api_version)]);
+            }
+        });
+    }
+
     // TODO #17 decode the different errors depending on http status
     // TODO #18 other callbacks like auth
     let func = quote! {
@@ -552,6 +585,10 @@ fn create_function(
             let client = &configuration.client;
             let uri_str = &format!(#fpath, &configuration.base_path, #uri_str_args);
             let mut req_builder = #client_verb;
+            #ts_request_builder
+            if let Some(token) = &configuration.bearer_access_token {
+                req_builder = req_builder.bearer_auth(token);
+            }
             let req = req_builder.build()?;
             let res = client.execute(req).await?;
             match res.error_for_status_ref() {
