@@ -395,15 +395,16 @@ fn map_type(param_type: &DataType) -> TokenStream {
 }
 
 fn get_param_type(param: &Parameter) -> Result<TokenStream> {
-    // let required = required.map_or(false); // TODO
-    if let Some(param_type) = &param.common.type_ {
-        Ok(map_type(param_type))
+    let is_required = param.required.unwrap_or(false);
+    let tp = if let Some(param_type) = &param.common.type_ {
+        map_type(param_type)
     } else if let Some(schema) = &param.schema {
-        Ok(get_type_name_for_schema_ref(schema)?)
+        get_type_name_for_schema_ref(schema)?
     } else {
-        let idt = ident("NoParamType1");
-        Ok(quote! { #idt }) // TOOD may be Err instead
-    }
+        eprintln!("WARN unkown param type for {}", &param.name);
+        quote! { serde_json::Value }
+    };
+    Ok(require(is_required, tp))
 }
 
 fn get_param_name_and_type(param: &Parameter) -> Result<TokenStream> {
