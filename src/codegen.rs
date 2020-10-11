@@ -167,9 +167,12 @@ impl CodeGen {
         let properties = self.spec.resolve_schema_map(doc_file, &schema.schema.properties)?;
         for (property_name, property) in &properties {
             let nm = ident(&property_name.to_snake_case());
-            let (field_tp_name, field_tp) = self.create_struct_field_type(doc_file, &ns, property_name, property)?;
+            let (mut field_tp_name, field_tp) = self.create_struct_field_type(doc_file, &ns, property_name, property)?;
             let is_required = required.contains(property_name.as_str());
-            let field_tp_name = require(is_required, field_tp_name);
+            let is_vec = is_vec(&field_tp_name);
+            if !is_vec {
+                field_tp_name = require(is_required, field_tp_name);
+            }
 
             if let Some(field_tp) = field_tp {
                 local_types.push(field_tp);
@@ -177,7 +180,11 @@ impl CodeGen {
             let skip_serialization_if = if is_required {
                 quote! {}
             } else {
-                quote! {skip_serializing_if = "Option::is_none"}
+                if is_vec {
+                    quote! {skip_serializing_if = "Vec::is_empty"}
+                } else {
+                    quote! {skip_serializing_if = "Option::is_none"}
+                }
             };
             let rename = if &nm.to_string() == property_name {
                 if is_required {
@@ -249,6 +256,10 @@ impl CodeGen {
             }
         }
     }
+}
+
+fn is_vec(ts: &TokenStream) -> bool {
+    ts.to_string().starts_with("Vec <")
 }
 
 fn is_schema_an_array(schema: &spec::ResolvedSchema) -> bool {
