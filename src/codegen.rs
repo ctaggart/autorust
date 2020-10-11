@@ -1,6 +1,6 @@
 #![allow(unused_variables, dead_code)]
 use crate::{spec, Config, OperationVerb, Reference, ResolvedSchema, Result, Spec};
-use autorust_openapi::{DataType, Operation, Parameter, PathItem, ReferenceOr, Schema};
+use autorust_openapi::{DataType, Parameter, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
@@ -428,10 +428,8 @@ fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     Ok(require(is_required, tp))
 }
 
-fn get_param_name_and_type(param: &Parameter) -> Result<TokenStream> {
-    let name = ident(&param.name.to_snake_case());
-    let typ = get_param_type(param)?;
-    Ok(quote! { #name: #typ })
+fn get_param_name(param: &Parameter) -> TokenStream {
+    ident(&param.name.to_snake_case())
 }
 
 fn parse_params(param_re: &Regex, path: &str) -> Vec<String> {
@@ -444,17 +442,12 @@ fn format_path(param_re: &Regex, path: &str) -> String {
     param_re.replace_all(path, "{}").to_string()
 }
 
-fn create_function_params(cg: &CodeGen, doc_file: &Path, op: &Operation) -> Result<TokenStream> {
-    let parameters: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &op.parameters)?;
+fn create_function_params(cg: &CodeGen, doc_file: &Path, parameters: &Vec<Parameter>) -> Result<TokenStream> {
     let mut params: Vec<TokenStream> = Vec::new();
-    let mut skip = HashSet::new();
-    if cg.api_version().is_some() {
-        skip.insert("api-version");
-    }
-    for param in &parameters {
-        if !skip.contains(param.name.as_str()) {
-            params.push(get_param_name_and_type(param)?);
-        }
+    for param in parameters {
+        let name = get_param_name(param);
+        let tp = get_param_type(param)?;
+        params.push(quote! { #name: #tp });
     }
     let slf = quote! { configuration: &Configuration };
     params.insert(0, slf);
@@ -554,7 +547,17 @@ fn create_function(
     let uri_str_args = quote! { #(#params),* };
 
     let fpath = format!("{{}}{}", &format_path(param_re, path));
-    let fparams = create_function_params(cg, doc_file, operation_verb.operation())?;
+
+    let parameters: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &operation_verb.operation().parameters)?;
+    let param_names: HashSet<_> = parameters.iter().map(|p| p.name.as_str()).collect();
+    let has_param_api_version = param_names.contains("api-version");
+    let mut skip = HashSet::new();
+    if cg.api_version().is_some() {
+        skip.insert("api-version");
+    }
+    let parameters = parameters.into_iter().filter(|p| !skip.contains(p.name.as_str())).collect();
+
+    let fparams = create_function_params(cg, doc_file, &parameters)?;
 
     // see if there is a body parameter
     let fresponse = create_function_return(operation_verb)?;
@@ -570,12 +573,43 @@ fn create_function(
     };
 
     let mut ts_request_builder = TokenStream::new();
-    if let Some(api_version) = cg.api_version() {
-        ts_request_builder.extend(quote! {
-            if let Some(token) = &configuration.bearer_access_token {
-                req_builder = req_builder.query(&[("api-version", &configuration.api_version)]);
+
+    // auth
+    ts_request_builder.extend(quote! {
+        if let Some(token) = &configuration.bearer_access_token {
+            req_builder = req_builder.bearer_auth(token);
+        }
+    });
+
+    // api-version param
+    if has_param_api_version {
+        if let Some(api_version) = cg.api_version() {
+            ts_request_builder.extend(quote! {
+                if let Some(token) = &configuration.bearer_access_token {
+                    req_builder = req_builder.query(&[("api-version", &configuration.api_version)]);
+                }
+            });
+        }
+    }
+
+    // params
+    for param in &parameters {
+        let param_name = &param.name;
+        let param_name_var = get_param_name(&param);
+        // TODO in_ should be enum
+        if param.in_ == "query" {
+            if param.required.unwrap_or(false) {
+                ts_request_builder.extend(quote! {
+                    req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
+                });
+            } else {
+                ts_request_builder.extend(quote! {
+                    if let Some(#param_name_var) = #param_name_var {
+                        req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
+                    }
+                });
             }
-        });
+        }
     }
 
     // TODO #17 decode the different errors depending on http status
@@ -586,9 +620,6 @@ fn create_function(
             let uri_str = &format!(#fpath, &configuration.base_path, #uri_str_args);
             let mut req_builder = #client_verb;
             #ts_request_builder
-            if let Some(token) = &configuration.bearer_access_token {
-                req_builder = req_builder.bearer_auth(token);
-            }
             let req = req_builder.build()?;
             let res = client.execute(req).await?;
             match res.error_for_status_ref() {
