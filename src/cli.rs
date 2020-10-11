@@ -1,41 +1,32 @@
 use crate::Result;
+use autorust_codegen::Config;
 use clap::{App, Arg, ArgMatches};
-use std::path::{Path, PathBuf};
 
 const NAME: &str = env!("CARGO_PKG_NAME");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const INPUT_FILE: &str = "input-file";
 const OUTPUT_FOLDER: &str = "output-folder";
 const GENERATED: &str = "generated";
+const API_VERSION: &str = "api-version";
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Config {
-    input_files: Vec<PathBuf>,
-    output_folder: PathBuf,
+pub fn config_try_new() -> Result<Config> {
+    let arg_matches = new_app().get_matches();
+    config_try_new_from_matches(&arg_matches)
 }
 
-impl Config {
-    pub fn try_new() -> Result<Config> {
-        let arg_matches = new_app().get_matches();
-        Self::try_new_from_matches(&arg_matches)
-    }
-
-    fn try_new_from_matches(arg_matches: &ArgMatches) -> Result<Config> {
-        let input_files = arg_matches.values_of(INPUT_FILE).unwrap().map(|s| s.into()).collect::<Vec<_>>();
-        let output_folder = arg_matches.value_of(OUTPUT_FOLDER).unwrap().to_owned().into();
-        Ok(Config {
-            input_files,
-            output_folder,
-        })
-    }
-
-    pub fn input_files(&self) -> &[PathBuf] {
-        &self.input_files
-    }
-
-    pub fn output_folder(&self) -> &Path {
-        &self.output_folder
-    }
+fn config_try_new_from_matches(arg_matches: &ArgMatches) -> Result<Config> {
+    let input_files = arg_matches
+        .values_of(INPUT_FILE)
+        .ok_or(INPUT_FILE)?
+        .map(|s| s.into())
+        .collect::<Vec<_>>();
+    let output_folder = arg_matches.value_of(OUTPUT_FOLDER).ok_or(OUTPUT_FOLDER)?.to_owned().into();
+    let api_version = arg_matches.value_of(API_VERSION).map(String::from);
+    Ok(Config {
+        input_files,
+        output_folder,
+        api_version,
+    })
 }
 
 fn new_app() -> App<'static> {
@@ -56,12 +47,19 @@ fn new_app() -> App<'static> {
                 .takes_value(true)
                 .default_value(GENERATED),
         )
+        .arg(
+            Arg::new(API_VERSION)
+                .about("sets the api-version query parameter to use")
+                .long(API_VERSION)
+                .takes_value(true),
+        )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use clap::ErrorKind;
+    use std::path::PathBuf;
 
     #[test]
     fn missing_required() {
@@ -95,7 +93,7 @@ mod tests {
         let m = new_app().try_get_matches_from(vec![NAME, "--input-file=abc.json", "--input-file=def.json", "--output-folder=src"]);
         assert!(m.is_ok(), "{:?}", m);
         let m = m?;
-        let c = Config::try_new_from_matches(&m)?;
+        let c = config_try_new_from_matches(&m)?;
         let input_files: [PathBuf; 2] = ["abc.json".into(), "def.json".into()];
         assert_eq!(c.input_files, input_files);
         let output_folder: PathBuf = "src".into();
