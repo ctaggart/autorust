@@ -24,7 +24,3 @@ regex = "*"
 indexmap = {version = "*", features = ["serde-1"]}
 path_abs = "*"
 clap = "3.0.0-beta.2"
-rustfmt-nightly = { git = "https://github.com/rust-lang/rustfmt", optional = true }
-
-[features]
-fmt = ["rustfmt-nightly"]

@@ -1,5 +1,4 @@
 mod codegen;
-pub mod format;
 pub mod path;
 mod reference;
 pub mod spec;
@@ -43,7 +42,7 @@ pub fn run(config: Config) -> Result<()> {
 
 fn write_file<P: AsRef<Path>>(path: P, tokens: &TokenStream) -> Result<()> {
     println!("writing file {}", path.as_ref().display());
-    let code = format::format_code(tokens.to_string());
+    let code = tokens.to_string();
     let mut buffer = File::create(path)?;
     buffer.write_all(&code.as_bytes())?;
     Ok(())
