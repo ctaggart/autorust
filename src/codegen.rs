@@ -1,6 +1,6 @@
 #![allow(unused_variables, dead_code)]
 use crate::{spec, Config, OperationVerb, Reference, ResolvedSchema, Result, Spec};
-use autorust_openapi::{DataType, Parameter, PathItem, ReferenceOr, Schema};
+use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
@@ -422,7 +422,7 @@ fn map_type(param_type: &DataType) -> TokenStream {
         DataType::Boolean => quote! { bool },
         _ => {
             eprintln!("WARN: map param type {:#?}", param_type);
-            quote! { map_type }  // TODO may be Err instead
+            quote! { map_type } // TODO may be Err instead
         }
     }
 }
@@ -432,10 +432,11 @@ fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     let tp = if let Some(param_type) = &param.common.type_ {
         map_type(param_type)
     } else if let Some(schema) = &param.schema {
-        get_type_name_for_schema_ref(schema)?
+        let tp = get_type_name_for_schema_ref(schema)?;
+        quote! { &#tp }
     } else {
         eprintln!("WARN unkown param type for {}", &param.name);
-        quote! { serde_json::Value }
+        quote! { &serde_json::Value }
     };
     Ok(require(is_required, tp))
 }
@@ -606,18 +607,60 @@ fn create_function(
     for param in &parameters {
         let param_name = &param.name;
         let param_name_var = get_param_name(&param);
-        // TODO in_ should be enum
-        if param.in_ == "query" {
-            if param.required.unwrap_or(false) {
-                ts_request_builder.extend(quote! {
-                    req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
-                });
-            } else {
-                ts_request_builder.extend(quote! {
-                    if let Some(#param_name_var) = #param_name_var {
+        let required = param.required.unwrap_or(false);
+        match param.in_ {
+            ParameterType::Path => {} // handled above
+            ParameterType::Query => {
+                if required {
+                    ts_request_builder.extend(quote! {
                         req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
-                    }
-                });
+                    });
+                } else {
+                    ts_request_builder.extend(quote! {
+                        if let Some(#param_name_var) = #param_name_var {
+                            req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
+                        }
+                    });
+                }
+            }
+            ParameterType::Header => {
+                if required {
+                    ts_request_builder.extend(quote! {
+                        req_builder = req_builder.header(#param_name, #param_name_var);
+                    });
+                } else {
+                    ts_request_builder.extend(quote! {
+                        if let Some(#param_name_var) = #param_name_var {
+                            req_builder = req_builder.header(#param_name, #param_name_var);
+                        }
+                    });
+                }
+            }
+            ParameterType::Body => {
+                if required {
+                    ts_request_builder.extend(quote! {
+                        req_builder = req_builder.json(#param_name_var);
+                    });
+                } else {
+                    ts_request_builder.extend(quote! {
+                        if let Some(#param_name_var) = #param_name_var {
+                            req_builder = req_builder.json(#param_name_var);
+                        }
+                    });
+                }
+            }
+            ParameterType::Form => {
+                if required {
+                    ts_request_builder.extend(quote! {
+                        req_builder = req_builder.form(#param_name_var);
+                    });
+                } else {
+                    ts_request_builder.extend(quote! {
+                        if let Some(#param_name_var) = #param_name_var {
+                            req_builder = req_builder.form(#param_name_var);
+                        }
+                    });
+                }
             }
         }
     }

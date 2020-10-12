@@ -4,19 +4,14 @@ A command line app similar to [AutoRest](https://github.com/azure/autorest), but
 
 ## Buliding
 
-By default building the project is very straight forward:
+By default, building the project is very straight forward:
 ```sh
 cargo build
 ```
 
 ### Formatting
 
-If you want to format the generated code, you'll need to use a nightly compiler and ensure that the `fmt` feature is enabled. Additionally, the [rustfmt-nightly](https://github.com/rust-lang/rustfmt) dependency requires that a couple of environment variables be set.
-``` sh
-export CFG_RELEASE_CHANNEL=nightly
-export CFG_RELEASE=nightly
-cargo +nightly build --features fmt
-```
+The generated code is not formatted. To format the generated code, run [cargo fmt](https://github.com/rust-lang/rustfmt#usage).
 
 ## Running
 The command line args are a subset of those supported by `autorest`.
@@ -24,7 +19,7 @@ The command line args are a subset of those supported by `autorest`.
 ``` sh
 cargo run -- --help
 cargo run -- --input-file=../azure-rest-api-specs/specification/vmware/resource-manager/Microsoft.AVS/stable/2020-03-20/vmware.json
-cargo +nightly run --features fmt -- --input-file ../OpenAPI-Specification/examples/v2.0/json/petstore.json
+cargo run -- --input-file ../OpenAPI-Specification/examples/v2.0/json/petstore.json
 ```
 
 ## Status
