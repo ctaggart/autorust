@@ -3,10 +3,6 @@ pub mod format;
 pub mod path;
 mod reference;
 pub mod spec;
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
-pub type Result<T> = std::result::Result<T, Error>;
-
 pub use self::{
     codegen::CodeGen,
     reference::Reference,
@@ -18,6 +14,9 @@ use std::{
     io::prelude::*,
     path::{Path, PathBuf},
 };
+
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
@@ -36,9 +35,9 @@ pub fn run(config: Config) -> Result<()> {
     write_file(&models_path, &models)?;
 
     // create api client from operations
-    let client = cg.create_client()?;
-    let client_path = path::join(&config.output_folder, "client.rs")?;
-    write_file(&client_path, &client)?;
+    let operations = cg.create_operations()?;
+    let operations_path = path::join(&config.output_folder, "operations.rs")?;
+    write_file(&operations_path, &operations)?;
     Ok(())
 }
 
