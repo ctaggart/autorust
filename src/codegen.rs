@@ -177,30 +177,28 @@ impl CodeGen {
             if let Some(field_tp) = field_tp {
                 local_types.push(field_tp);
             }
-            let skip_serialization_if = if is_required {
+            let mut serde_attrs: Vec<TokenStream> = Vec::new();
+            if &nm.to_string() != property_name {
+                serde_attrs.push(quote! { rename = #property_name });
+            }
+            if property.schema.read_only == Some(true) {
+                serde_attrs.push(quote! { skip_serializing });
+            } else {
+                if !is_required {
+                    if is_vec {
+                        serde_attrs.push(quote! { skip_serializing_if = "Vec::is_empty"});
+                    } else {
+                        serde_attrs.push(quote! { skip_serializing_if = "Option::is_none"});
+                    }
+                }
+            }
+            let serde = if serde_attrs.len() > 0 {
+                quote! { #[serde(#(#serde_attrs),*)] }
+            } else {
                 quote! {}
-            } else {
-                if is_vec {
-                    quote! {skip_serializing_if = "Vec::is_empty"}
-                } else {
-                    quote! {skip_serializing_if = "Option::is_none"}
-                }
-            };
-            let rename = if &nm.to_string() == property_name {
-                if is_required {
-                    quote! {}
-                } else {
-                    quote! {#[serde(#skip_serialization_if)]}
-                }
-            } else {
-                if is_required {
-                    quote! {#[serde(rename = #property_name)]}
-                } else {
-                    quote! {#[serde(rename = #property_name, #skip_serialization_if)]}
-                }
             };
             props.extend(quote! {
-                #rename
+                #serde
                 pub #nm: #field_tp_name,
             });
         }
