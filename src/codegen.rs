@@ -116,7 +116,7 @@ impl CodeGen {
         Ok(file)
     }
 
-    pub fn create_client(&self) -> Result<TokenStream> {
+    pub fn create_operations(&self) -> Result<TokenStream> {
         let mut file = TokenStream::new();
         file.extend(create_generated_by_header());
         file.extend(quote! {
@@ -419,7 +419,11 @@ fn map_type(param_type: &DataType) -> TokenStream {
     match param_type {
         DataType::String => quote! { &str },
         DataType::Integer => quote! { i64 },
-        _ => quote! { map_type }, // TODO may be Err instead
+        DataType::Boolean => quote! { bool },
+        _ => {
+            eprintln!("WARN: map param type {:#?}", param_type);
+            quote! { map_type }  // TODO may be Err instead
+        }
     }
 }
 
