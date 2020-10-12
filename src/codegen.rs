@@ -593,9 +593,7 @@ fn create_function(
     if has_param_api_version {
         if let Some(api_version) = cg.api_version() {
             ts_request_builder.extend(quote! {
-                if let Some(token) = &configuration.bearer_access_token {
-                    req_builder = req_builder.query(&[("api-version", &configuration.api_version)]);
-                }
+                req_builder = req_builder.query(&[("api-version", &configuration.api_version)]);
             });
         }
     }
