@@ -1,26 +1,5 @@
-[package]
-name = "autorust"
-version = "0.1.0"
-authors = ["Cameron Taggart <cameron.taggart@gmail.com>"]
-edition = "2018"
-
-[lib]
-name = "autorust_codegen"
-path = "src/lib.rs"
-
-[[bin]]
-name = "autorust"
-path = "src/main.rs"
-
-[dependencies]
-autorust_openapi = { git = "https://github.com/ctaggart/autorust_openapi" }
-# autorust_openapi = { path = "../autorust_openapi" }
-quote = "*"
-proc-macro2 = { version = "*", default-features = false }
-serde_json = "*"
-serde_yaml = "*"
-heck = "*"
-regex = "*"
-indexmap = {version = "*", features = ["serde-1"]}
-path_abs = "*"
-clap = "3.0.0-beta.2"
+[workspace]
+members = [
+  "autorust",
+  "codegen",
+]
