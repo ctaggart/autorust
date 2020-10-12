@@ -123,7 +123,6 @@ impl CodeGen {
             #![allow(unused_mut)]
             #![allow(unused_variables)]
             use crate::*;
-            use anyhow::{Error, Result};
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
         for (doc_file, doc) in &self.spec.docs {
@@ -631,14 +630,7 @@ fn create_function(
             #ts_request_builder
             let req = req_builder.build()?;
             let res = client.execute(req).await?;
-            match res.error_for_status_ref() {
-                Ok(_) => Ok(res.json().await?),
-                Err(err) => {
-                    let e = Error::new(err);
-                    let e = e.context(res.text().await?);
-                    Err(e)
-                },
-            }
+            Ok(res.json().await?)
         }
     };
     Ok(TokenStream::from(func))
