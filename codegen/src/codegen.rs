@@ -122,16 +122,46 @@ impl CodeGen {
         file.extend(quote! {
             #![allow(unused_mut)]
             #![allow(unused_variables)]
-            use crate::*;
+            #![allow(unused_imports)]
+            use crate::{models::*, *};
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
+        let mut modules: IndexMap<Option<String>, TokenStream> = IndexMap::new();
         for (doc_file, doc) in &self.spec.docs {
             let paths = self.spec.resolve_path_map(doc_file, &doc.paths)?;
             for (path, item) in &paths {
                 // println!("{}", path);
                 for op in spec::pathitem_operations(item) {
                     // println!("{:?}", op.operation_id);
-                    file.extend(create_function(self, doc_file, path, item, &op, &param_re))
+                    let (module_name, function_name) = op.function_name(path);
+                    let function = create_function(self, doc_file, path, item, &op, &param_re, &function_name)?;
+                    if modules.contains_key(&module_name) {}
+                    match modules.get_mut(&module_name) {
+                        Some(module) => {
+                            module.extend(function);
+                        }
+                        None => {
+                            let mut module = TokenStream::new();
+                            module.extend(function);
+                            modules.insert(module_name, module);
+                        }
+                    }
+                }
+            }
+        }
+        for (module_name, module) in modules {
+            match module_name {
+                Some(module_name) => {
+                    let name = ident(&module_name);
+                    file.extend(quote! {
+                        pub mod #name {
+                            use crate::{models::*, *};
+                            #module
+                        }
+                    });
+                }
+                None => {
+                    file.extend(module);
                 }
             }
         }
@@ -528,14 +558,6 @@ fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
     Ok(quote! { Result<()> })
 }
 
-/// Creating a function name from the path and verb when an operationId is not specified.
-/// All azure-rest-api-specs operations should have an operationId.
-fn create_function_name(path: &str, verb_name: &str) -> String {
-    let mut path = path.split('/').filter(|&x| !x.is_empty()).collect::<Vec<_>>();
-    path.push(verb_name);
-    path.join("_")
-}
-
 fn create_function(
     cg: &CodeGen,
     doc_file: &Path,
@@ -543,16 +565,9 @@ fn create_function(
     item: &PathItem,
     operation_verb: &OperationVerb,
     param_re: &Regex,
+    function_name: &str,
 ) -> Result<TokenStream> {
-    let fname = ident(
-        operation_verb
-            .operation()
-            .operation_id
-            .as_ref()
-            .unwrap_or(&create_function_name(path, operation_verb.verb_name()))
-            .to_snake_case()
-            .as_ref(),
-    );
+    let fname = ident(function_name);
 
     let params = parse_params(param_re, path);
     // println!("path params {:#?}", params);
@@ -697,10 +712,5 @@ mod tests {
     fn test_ident_three_dot_two() {
         let idt = ident("3.2");
         assert_eq!(idt.to_string(), "_3_2");
-    }
-
-    #[test]
-    fn test_create_function_name() {
-        assert_eq!(create_function_name("/pets", "get"), "pets_get");
     }
 }

@@ -1,5 +1,6 @@
 use crate::{path, Reference, Result};
 use autorust_openapi::{AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
+use heck::SnakeCase;
 use indexmap::{IndexMap, IndexSet};
 use std::{
     ffi::OsStr,
@@ -244,6 +245,33 @@ impl<'a> OperationVerb<'a> {
             OperationVerb::Head(_) => "head",
         }
     }
+
+    pub fn function_name(&self, path: &str) -> (Option<String>, String) {
+        if let Some(operation_id) = &self.operation().operation_id {
+            function_name_from_operation_id(operation_id)
+        } else {
+            (None, create_function_name(path, self.verb_name()))
+        }
+    }
+}
+
+/// Returns the module name and function name.
+/// The module name is optional and is text before an underscore in the operatonId.
+fn function_name_from_operation_id(operation_id: &str) -> (Option<String>, String) {
+    let parts: Vec<&str> = operation_id.splitn(2, '_').collect();
+    if parts.len() == 2 {
+        (Some(parts[0].to_snake_case()), parts[1].to_snake_case())
+    } else {
+        (None, parts[0].to_snake_case())
+    }
+}
+
+/// Creating a function name from the path and verb when an operationId is not specified.
+/// All azure-rest-api-specs operations should have an operationId.
+fn create_function_name(path: &str, verb_name: &str) -> String {
+    let mut path = path.split('/').filter(|&x| !x.is_empty()).collect::<Vec<_>>();
+    path.push(verb_name);
+    path.join("_")
 }
 
 pub fn pathitem_operations(item: &PathItem) -> impl Iterator<Item = OperationVerb> {
@@ -405,4 +433,23 @@ pub fn get_schema_schema_refs(schema: &Schema) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_create_function_name() {
+        assert_eq!(create_function_name("/pets", "get"), "pets_get");
+    }
+
+    #[test]
+    fn test_function_name_from_operation_id() {
+        assert_eq!(
+            function_name_from_operation_id("PrivateClouds_CreateOrUpdate"),
+            (Some("private_clouds".to_owned()), "create_or_update".to_owned())
+        );
+        assert_eq!(function_name_from_operation_id("get"), (None, "get".to_owned()));
+    }
 }
