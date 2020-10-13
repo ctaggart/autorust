@@ -1,7 +1,4 @@
 on: [push, pull_request]
-env:
-  CFG_RELEASE: nightly
-  CFG_RELEASE_CHANNEL: nightly
 jobs:
   build:
     runs-on: ubuntu-20.04
