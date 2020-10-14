@@ -5,7 +5,7 @@ use autorust_codegen::*;
 
 fn main() -> Result<()> {
     let api_version = "2020-08-01-preview";
-    let output_folder = "../azure-sdk-for-rust/services/storage/mgmt/2020-08-01-preview/src/";
+    let output_folder = "../azure-sdk-for-rust/services/storage/mgmt/src/v2020_08_01_preview";
     let input_files = [
         "../azure-rest-api-specs/specification/storage/resource-manager/Microsoft.Storage/preview/2020-08-01-preview/storage.json",
         "../azure-rest-api-specs/specification/storage/resource-manager/Microsoft.Storage/preview/2020-08-01-preview/blob.json",
@@ -20,7 +20,7 @@ fn main() -> Result<()> {
     })?;
 
     let api_version = "2019-06-01";
-    let output_folder = "../azure-sdk-for-rust/services/storage/mgmt/2019-06-01/src/";
+    let output_folder = "../azure-sdk-for-rust/services/storage/mgmt/src/v2019_06_01";
     let input_files = [
         "../azure-rest-api-specs/specification/storage/resource-manager/Microsoft.Storage/stable/2019-06-01/storage.json",
         "../azure-rest-api-specs/specification/storage/resource-manager/Microsoft.Storage/stable/2019-06-01/blob.json",
