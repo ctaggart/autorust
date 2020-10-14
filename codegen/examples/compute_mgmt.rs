@@ -1,11 +1,11 @@
 // cargo run --example compute_mgmt
-// https://github.com/Azure/azure-rest-api-specs/blob/master/specification/compute/resource-manager/
+// https://github.com/Azure/azure-rest-api-specs/blob/master/specification/compute/resource-manager
 
 use autorust_codegen::*;
 
 fn main() -> Result<()> {
     let api_version = "2020-06-01";
-    let output_folder = "../azure-sdk-for-rust/services/compute/mgmt/2020-06-01/src/";
+    let output_folder = "../azure-sdk-for-rust/services/compute/mgmt/src/v2020_06_01";
     let input_files = [
         "../azure-rest-api-specs/specification/compute/resource-manager/Microsoft.Compute/stable/2020-06-01/compute.json",
         "../azure-rest-api-specs/specification/compute/resource-manager/Microsoft.Compute/stable/2020-06-01/runCommands.json",
