@@ -1,6 +1,6 @@
 #![allow(unused_variables, dead_code)]
-use crate::{spec, OperationVerb, Reference, ResolvedSchema, Result, Spec};
-use autorust_openapi::{DataType, Operation, Parameter, PathItem, ReferenceOr, Schema};
+use crate::{spec, Config, OperationVerb, Reference, ResolvedSchema, Result, Spec};
+use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
@@ -8,25 +8,37 @@ use quote::{format_ident, quote, ToTokens};
 use regex::Regex;
 use serde_json::Value;
 use spec::{get_api_schema_refs, get_schema_schema_refs, RefKey};
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 /// code generation context
 pub struct CodeGen {
+    config: Config,
     pub spec: Spec,
 }
+
 impl CodeGen {
-    pub fn from_files<P: AsRef<Path>>(input_files: &[P]) -> Result<Self> {
-        let spec = Spec::read_files(input_files)?;
-        Ok(Self { spec })
+    pub fn new(config: Config) -> Result<Self> {
+        let spec = Spec::read_files(&config.input_files)?;
+        Ok(Self { config, spec })
+    }
+
+    pub fn input_files(&self) -> &[PathBuf] {
+        &self.config.input_files
+    }
+
+    pub fn output_folder(&self) -> &Path {
+        &self.config.output_folder
+    }
+
+    pub fn api_version(&self) -> Option<&str> {
+        self.config.api_version.as_deref()
     }
 
     // For create_models. Recursively adds schema refs.
-    fn add_schema_refs(
-        &self,
-        schemas: &mut IndexMap<RefKey, ResolvedSchema>,
-        doc_file: &Path,
-        schema_ref: &str,
-    ) -> Result<()> {
+    fn add_schema_refs(&self, schemas: &mut IndexMap<RefKey, ResolvedSchema>, doc_file: &Path, schema_ref: &str) -> Result<()> {
         let schema = self.spec.resolve_schema_ref(doc_file, schema_ref)?;
         if let Some(ref_key) = schema.ref_key.clone() {
             if !schemas.contains_key(&ref_key) {
@@ -90,6 +102,10 @@ impl CodeGen {
             } else {
                 if is_schema_an_array(schema) {
                     file.extend(self.create_vec_alias(doc_file, schema_name, schema)?);
+                } else if is_local_enum(schema) {
+                    let no_namespace = TokenStream::new();
+                    let (_tp_name, tp) = create_enum(&no_namespace, schema_name, schema);
+                    file.extend(tp);
                 } else {
                     for stream in self.create_struct(doc_file, schema_name, schema)? {
                         file.extend(stream);
@@ -100,47 +116,66 @@ impl CodeGen {
         Ok(file)
     }
 
-    pub fn create_client(&self) -> Result<TokenStream> {
+    pub fn create_operations(&self) -> Result<TokenStream> {
         let mut file = TokenStream::new();
         file.extend(create_generated_by_header());
         file.extend(quote! {
             #![allow(unused_mut)]
             #![allow(unused_variables)]
-            use crate::*;
-            use anyhow::{Error, Result};
+            #![allow(unused_imports)]
+            use crate::{models::*, *};
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
+        let mut modules: IndexMap<Option<String>, TokenStream> = IndexMap::new();
         for (doc_file, doc) in &self.spec.docs {
             let paths = self.spec.resolve_path_map(doc_file, &doc.paths)?;
             for (path, item) in &paths {
                 // println!("{}", path);
                 for op in spec::pathitem_operations(item) {
                     // println!("{:?}", op.operation_id);
-                    file.extend(create_function(self, doc_file, path, item, &op, &param_re))
+                    let (module_name, function_name) = op.function_name(path);
+                    let function = create_function(self, doc_file, path, item, &op, &param_re, &function_name)?;
+                    if modules.contains_key(&module_name) {}
+                    match modules.get_mut(&module_name) {
+                        Some(module) => {
+                            module.extend(function);
+                        }
+                        None => {
+                            let mut module = TokenStream::new();
+                            module.extend(function);
+                            modules.insert(module_name, module);
+                        }
+                    }
+                }
+            }
+        }
+        for (module_name, module) in modules {
+            match module_name {
+                Some(module_name) => {
+                    let name = ident(&module_name);
+                    file.extend(quote! {
+                        pub mod #name {
+                            use crate::{models::*, *};
+                            #module
+                        }
+                    });
+                }
+                None => {
+                    file.extend(module);
                 }
             }
         }
         Ok(file)
     }
 
-    fn create_vec_alias(
-        &self,
-        doc_file: &Path,
-        alias_name: &str,
-        schema: &ResolvedSchema,
-    ) -> Result<TokenStream> {
+    fn create_vec_alias(&self, doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
         let items = get_schema_array_items(&schema.schema)?;
         let typ = ident(&alias_name.to_camel_case());
         let items_typ = get_type_name_for_schema_ref(&items)?;
         Ok(quote! { pub type #typ = Vec<#items_typ>; })
     }
 
-    fn create_struct(
-        &self,
-        doc_file: &Path,
-        struct_name: &str,
-        schema: &ResolvedSchema,
-    ) -> Result<Vec<TokenStream>> {
+    fn create_struct(&self, doc_file: &Path, struct_name: &str, schema: &ResolvedSchema) -> Result<Vec<TokenStream>> {
         // println!("create_struct {} {}", doc_file.to_str().unwrap(), struct_name);
         let mut streams = Vec::new();
         let mut local_types = Vec::new();
@@ -149,42 +184,52 @@ impl CodeGen {
         let nm = ident(&struct_name.to_camel_case());
         let required: HashSet<&str> = schema.schema.required.iter().map(String::as_str).collect();
 
-        let properties = self
-            .spec
-            .resolve_schema_map(doc_file, &schema.schema.properties)?;
+        for schema in &schema.schema.all_of {
+            let type_name = get_type_name_for_schema_ref(schema)?;
+            let field_name = ident(&type_name.to_string().to_snake_case());
+            props.extend(quote! {
+                #[serde(flatten)]
+                pub #field_name: #type_name,
+            });
+        }
+
+        let properties = self.spec.resolve_schema_map(doc_file, &schema.schema.properties)?;
         for (property_name, property) in &properties {
             let nm = ident(&property_name.to_snake_case());
-            let (field_tp_name, field_tp) =
-                self.create_struct_field_type(&ns, property_name, property)?;
+            let (mut field_tp_name, field_tp) = self.create_struct_field_type(doc_file, &ns, property_name, property)?;
             let is_required = required.contains(property_name.as_str());
-            let field_tp_name = require(is_required, field_tp_name);
+            let is_vec = is_vec(&field_tp_name);
+            if !is_vec {
+                field_tp_name = require(is_required, field_tp_name);
+            }
 
             if let Some(field_tp) = field_tp {
                 local_types.push(field_tp);
             }
-            let skip_serialization_if = if is_required {
+            let mut serde_attrs: Vec<TokenStream> = Vec::new();
+            if &nm.to_string() != property_name {
+                serde_attrs.push(quote! { rename = #property_name });
+            }
+            if property.schema.read_only == Some(true) {
+                serde_attrs.push(quote! { skip_serializing });
+            } else {
+                if !is_required {
+                    if is_vec {
+                        serde_attrs.push(quote! { skip_serializing_if = "Vec::is_empty"});
+                    } else {
+                        serde_attrs.push(quote! { skip_serializing_if = "Option::is_none"});
+                    }
+                }
+            }
+            let serde = if serde_attrs.len() > 0 {
+                quote! { #[serde(#(#serde_attrs),*)] }
+            } else {
                 quote! {}
-            } else {
-                quote! {skip_serializing_if = "Option::is_none"}
             };
-            let rename = if &nm.to_string() == property_name {
-                if is_required {
-                    quote! {}
-                } else {
-                    quote! {#[serde(#skip_serialization_if)]}
-                }
-            } else {
-                if is_required {
-                    quote! {#[serde(rename = #property_name)]}
-                } else {
-                    quote! {#[serde(rename = #property_name, #skip_serialization_if)]}
-                }
-            };
-            let prop = quote! {
-                #rename
-                #nm: #field_tp_name,
-            };
-            props.extend(prop);
+            props.extend(quote! {
+                #serde
+                pub #nm: #field_tp_name,
+            });
         }
 
         let st = quote! {
@@ -213,6 +258,7 @@ impl CodeGen {
     /// Optionally, creates a type for a local schema.
     fn create_struct_field_type(
         &self,
+        doc_file: &Path,
         namespace: &TokenStream,
         property_name: &str,
         property: &ResolvedSchema,
@@ -226,12 +272,21 @@ impl CodeGen {
                 if is_local_enum(property) {
                     let (tp_name, tp) = create_enum(namespace, property_name, property);
                     Ok((tp_name, Some(tp)))
+                } else if is_local_struct(property) {
+                    let id = ident(&property_name.to_camel_case());
+                    let tp_name = quote! {#namespace::#id};
+                    let tps = self.create_struct(doc_file, property_name, property)?;
+                    Ok((tp_name, Some(tps[0].clone())))
                 } else {
                     Ok((get_type_name_for_schema(&property.schema)?, None))
                 }
             }
         }
     }
+}
+
+fn is_vec(ts: &TokenStream) -> bool {
+    ts.to_string().starts_with("Vec <")
 }
 
 fn is_schema_an_array(schema: &spec::ResolvedSchema) -> bool {
@@ -316,11 +371,11 @@ fn is_local_enum(property: &ResolvedSchema) -> bool {
     property.schema.common.enum_.len() > 0
 }
 
-fn create_enum(
-    namespace: &TokenStream,
-    property_name: &str,
-    property: &ResolvedSchema,
-) -> (TokenStream, TokenStream) {
+fn is_local_struct(property: &ResolvedSchema) -> bool {
+    property.schema.properties.len() > 0
+}
+
+fn create_enum(namespace: &TokenStream, property_name: &str, property: &ResolvedSchema) -> (TokenStream, TokenStream) {
     let schema_type = property.schema.common.type_.as_ref();
     let enum_values = enum_values_as_strings(&property.schema.common.enum_);
     let id = ident(&property_name.to_camel_case());
@@ -394,47 +449,48 @@ fn map_type(param_type: &DataType) -> TokenStream {
     match param_type {
         DataType::String => quote! { &str },
         DataType::Integer => quote! { i64 },
-        _ => quote! { map_type }, // TODO may be Err instead
+        DataType::Boolean => quote! { bool },
+        _ => {
+            eprintln!("WARN: map param type {:#?}", param_type);
+            quote! { map_type } // TODO may be Err instead
+        }
     }
 }
 
 fn get_param_type(param: &Parameter) -> Result<TokenStream> {
-    // let required = required.map_or(false); // TODO
-    if let Some(param_type) = &param.common.type_ {
-        Ok(map_type(param_type))
+    let is_required = param.required.unwrap_or(false);
+    let tp = if let Some(param_type) = &param.common.type_ {
+        map_type(param_type)
     } else if let Some(schema) = &param.schema {
-        Ok(get_type_name_for_schema_ref(schema)?)
+        let tp = get_type_name_for_schema_ref(schema)?;
+        quote! { &#tp }
     } else {
-        let idt = ident("NoParamType1");
-        Ok(quote! { #idt }) // TOOD may be Err instead
-    }
+        eprintln!("WARN unkown param type for {}", &param.name);
+        quote! { &serde_json::Value }
+    };
+    Ok(require(is_required, tp))
 }
 
-fn get_param_name_and_type(param: &Parameter) -> Result<TokenStream> {
-    let name = ident(&param.name.to_snake_case());
-    let typ = get_param_type(param)?;
-    Ok(quote! { #name: #typ })
+fn get_param_name(param: &Parameter) -> TokenStream {
+    ident(&param.name.to_snake_case())
 }
 
 fn parse_params(param_re: &Regex, path: &str) -> Vec<String> {
     // capture 0 is the whole match and 1 is the actual capture like other languages
     // param_re.find_iter(path).into_iter().map(|m| m.as_str().to_string()).collect()
-    param_re
-        .captures_iter(path)
-        .into_iter()
-        .map(|c| c[1].to_string())
-        .collect()
+    param_re.captures_iter(path).into_iter().map(|c| c[1].to_string()).collect()
 }
 
 fn format_path(param_re: &Regex, path: &str) -> String {
     param_re.replace_all(path, "{}").to_string()
 }
 
-fn create_function_params(cg: &CodeGen, doc_file: &Path, op: &Operation) -> Result<TokenStream> {
-    let parameters: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &op.parameters)?;
+fn create_function_params(cg: &CodeGen, doc_file: &Path, parameters: &Vec<Parameter>) -> Result<TokenStream> {
     let mut params: Vec<TokenStream> = Vec::new();
-    for param in &parameters {
-        params.push(get_param_name_and_type(param)?);
+    for param in parameters {
+        let name = get_param_name(param);
+        let tp = get_param_type(param)?;
+        params.push(quote! { #name: #tp });
     }
     let slf = quote! { configuration: &Configuration };
     params.insert(0, slf);
@@ -482,11 +538,7 @@ fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>) -> Result<TokenStr
     match schema {
         ReferenceOr::Reference { reference, .. } => {
             let rf = Reference::parse(&reference)?;
-            let idt = ident(
-                &rf.name
-                    .ok_or_else(|| format!("no name for ref {}", reference))?
-                    .to_camel_case(),
-            );
+            let idt = ident(&rf.name.ok_or_else(|| format!("no name for ref {}", reference))?.to_camel_case());
             Ok(quote! { #idt })
         }
         ReferenceOr::Item(schema) => get_type_name_for_schema(schema),
@@ -506,17 +558,6 @@ fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
     Ok(quote! { Result<()> })
 }
 
-/// Creating a function name from the path and verb when an operationId is not specified.
-/// All azure-rest-api-specs operations should have an operationId.
-fn create_function_name(path: &str, verb_name: &str) -> String {
-    let mut path = path
-        .split('/')
-        .filter(|&x| !x.is_empty())
-        .collect::<Vec<_>>();
-    path.push(verb_name);
-    path.join("_")
-}
-
 fn create_function(
     cg: &CodeGen,
     doc_file: &Path,
@@ -524,16 +565,9 @@ fn create_function(
     item: &PathItem,
     operation_verb: &OperationVerb,
     param_re: &Regex,
+    function_name: &str,
 ) -> Result<TokenStream> {
-    let fname = ident(
-        operation_verb
-            .operation()
-            .operation_id
-            .as_ref()
-            .unwrap_or(&create_function_name(path, operation_verb.verb_name()))
-            .to_snake_case()
-            .as_ref(),
-    );
+    let fname = ident(function_name);
 
     let params = parse_params(param_re, path);
     // println!("path params {:#?}", params);
@@ -542,9 +576,16 @@ fn create_function(
 
     let fpath = format!("{{}}{}", &format_path(param_re, path));
 
-    // get path parameters
-    // Option if not required
-    let fparams = create_function_params(cg, doc_file, operation_verb.operation())?;
+    let parameters: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &operation_verb.operation().parameters)?;
+    let param_names: HashSet<_> = parameters.iter().map(|p| p.name.as_str()).collect();
+    let has_param_api_version = param_names.contains("api-version");
+    let mut skip = HashSet::new();
+    if cg.api_version().is_some() {
+        skip.insert("api-version");
+    }
+    let parameters = parameters.into_iter().filter(|p| !skip.contains(p.name.as_str())).collect();
+
+    let fparams = create_function_params(cg, doc_file, &parameters)?;
 
     // see if there is a body parameter
     let fresponse = create_function_return(operation_verb)?;
@@ -559,6 +600,86 @@ fn create_function(
         OperationVerb::Head(_) => quote! { client.head(uri_str) },
     };
 
+    let mut ts_request_builder = TokenStream::new();
+
+    // auth
+    ts_request_builder.extend(quote! {
+        if let Some(token) = &configuration.bearer_access_token {
+            req_builder = req_builder.bearer_auth(token);
+        }
+    });
+
+    // api-version param
+    if has_param_api_version {
+        if let Some(api_version) = cg.api_version() {
+            ts_request_builder.extend(quote! {
+                req_builder = req_builder.query(&[("api-version", &configuration.api_version)]);
+            });
+        }
+    }
+
+    // params
+    for param in &parameters {
+        let param_name = &param.name;
+        let param_name_var = get_param_name(&param);
+        let required = param.required.unwrap_or(false);
+        match param.in_ {
+            ParameterType::Path => {} // handled above
+            ParameterType::Query => {
+                if required {
+                    ts_request_builder.extend(quote! {
+                        req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
+                    });
+                } else {
+                    ts_request_builder.extend(quote! {
+                        if let Some(#param_name_var) = #param_name_var {
+                            req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
+                        }
+                    });
+                }
+            }
+            ParameterType::Header => {
+                if required {
+                    ts_request_builder.extend(quote! {
+                        req_builder = req_builder.header(#param_name, #param_name_var);
+                    });
+                } else {
+                    ts_request_builder.extend(quote! {
+                        if let Some(#param_name_var) = #param_name_var {
+                            req_builder = req_builder.header(#param_name, #param_name_var);
+                        }
+                    });
+                }
+            }
+            ParameterType::Body => {
+                if required {
+                    ts_request_builder.extend(quote! {
+                        req_builder = req_builder.json(#param_name_var);
+                    });
+                } else {
+                    ts_request_builder.extend(quote! {
+                        if let Some(#param_name_var) = #param_name_var {
+                            req_builder = req_builder.json(#param_name_var);
+                        }
+                    });
+                }
+            }
+            ParameterType::Form => {
+                if required {
+                    ts_request_builder.extend(quote! {
+                        req_builder = req_builder.form(#param_name_var);
+                    });
+                } else {
+                    ts_request_builder.extend(quote! {
+                        if let Some(#param_name_var) = #param_name_var {
+                            req_builder = req_builder.form(#param_name_var);
+                        }
+                    });
+                }
+            }
+        }
+    }
+
     // TODO #17 decode the different errors depending on http status
     // TODO #18 other callbacks like auth
     let func = quote! {
@@ -566,16 +687,10 @@ fn create_function(
             let client = &configuration.client;
             let uri_str = &format!(#fpath, &configuration.base_path, #uri_str_args);
             let mut req_builder = #client_verb;
+            #ts_request_builder
             let req = req_builder.build()?;
             let res = client.execute(req).await?;
-            match res.error_for_status_ref() {
-                Ok(_) => Ok(res.json().await?),
-                Err(err) => {
-                    let e = Error::new(err);
-                    let e = e.context(res.text().await?);
-                    Err(e)
-                },
-            }
+            Ok(res.json().await?)
         }
     };
     Ok(TokenStream::from(func))
@@ -597,10 +712,5 @@ mod tests {
     fn test_ident_three_dot_two() {
         let idt = ident("3.2");
         assert_eq!(idt.to_string(), "_3_2");
-    }
-
-    #[test]
-    fn test_create_function_name() {
-        assert_eq!(create_function_name("/pets", "get"), "pets_get");
     }
 }

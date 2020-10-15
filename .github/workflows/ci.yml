@@ -1,7 +1,4 @@
 on: [push, pull_request]
-env:
-  CFG_RELEASE: nightly
-  CFG_RELEASE_CHANNEL: nightly
 jobs:
   build:
     runs-on: ubuntu-20.04
@@ -13,8 +10,14 @@ jobs:
     - name: install rust nightly
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: nightly
-        override: true
+        toolchain: stable
+        default: true
+        profile: minimal
+        components: rustfmt
+    - name: fmt check
+      run: |
+        cd $GITHUB_WORKSPACE/autorust
+        cargo fmt --all -- --check
     - name: unit tests
       run: |
         cd $GITHUB_WORKSPACE/autorust
