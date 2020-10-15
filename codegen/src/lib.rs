@@ -1,4 +1,5 @@
 mod codegen;
+mod config_parser;
 pub mod path;
 mod reference;
 pub mod spec;

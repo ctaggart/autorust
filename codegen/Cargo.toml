@@ -17,3 +17,5 @@ heck = "*"
 regex = "*"
 indexmap = {version = "*", features = ["serde-1"]}
 path_abs = "*"
+comrak = "0.8"
+serde = "1.0"
