@@ -7,3 +7,4 @@ client*.rs
 model*.rs
 generated
 node_modules
+package*.json
