@@ -6,3 +6,4 @@ b.rs
 client*.rs
 model*.rs
 generated
+node_modules
