@@ -477,7 +477,6 @@ fn get_param_name(param: &Parameter) -> TokenStream {
 
 fn parse_params(param_re: &Regex, path: &str) -> Vec<String> {
     // capture 0 is the whole match and 1 is the actual capture like other languages
-    // param_re.find_iter(path).into_iter().map(|m| m.as_str().to_string()).collect()
     param_re.captures_iter(path).into_iter().map(|c| c[1].to_string()).collect()
 }
 
