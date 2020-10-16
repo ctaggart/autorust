@@ -413,7 +413,7 @@ fn require(is_required: bool, tp: TokenStream) -> TokenStream {
     }
 }
 
-fn ident(text: &str) -> TokenStream {
+pub fn ident(text: &str) -> TokenStream {
     let text = text.replace(".", "_");
     // prefix with underscore if starts with invalid character
     let text = match text.chars().next().unwrap() {
@@ -693,6 +693,14 @@ fn create_function(
         }
     };
     Ok(TokenStream::from(func))
+}
+
+pub fn create_mod(api_version: &str) -> TokenStream {
+    quote! {
+        pub mod models;
+        pub mod operations;
+        pub const API_VERSION: &str = #api_version;
+    }
 }
 
 #[cfg(test)]
