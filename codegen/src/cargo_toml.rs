@@ -6,7 +6,7 @@ use std::{
 };
 
 pub fn create(crate_name: &str, feature_mod_names: &Vec<(String, String)>, path: &Path) -> Result<()> {
-    let file = File::create(path)?;
+    let file = File::create(path).map_err(|_| format!("create {:?}", path))?;
     let mut file = LineWriter::new(file);
     file.write_all(
         format!(

@@ -14,7 +14,7 @@ pub struct Configuration {
 /// Receives the AutoRest configuration file and parses it to its various configurations (by tags/API versions),
 /// according to its extension.
 /// e.g. for "path/to/config.md", it will get parsed as CommonMark [Literate Configuration](http://azure.github.io/autorest/user/literate-file-formats/configuration.html).
-pub fn parse_configurations_from_autorest_config_file(config_file: PathBuf) -> Vec<Configuration> {
+pub fn parse_configurations_from_autorest_config_file(config_file: &PathBuf) -> Vec<Configuration> {
     let extension = config_file.extension().expect(&format!(
         "Received AutoRest configuration file did not contain an expected extension (e.g. '.md'): '{0}'",
         config_file.as_path().to_str().unwrap()
@@ -148,19 +148,34 @@ fn starts_with_number(text: &str) -> bool {
 
 /// Get an API Version from tag.
 /// It is a date in yyyy-mm-dd format followed by an optional "-preview".
-pub fn to_api_version(tag: &str) -> Option<String> {
-    let re = regex::Regex::new(r"\d{4}-\d{2}-\d{2}(:?-\w*)?").unwrap();
-    let captures: Vec<String> = re.captures_iter(tag).into_iter().map(|c| c[0].to_string()).collect();
+pub fn to_api_version(package: &Configuration) -> Option<String> {
+    let re = regex::Regex::new(r"\d{4}-\d{2}(:?-\d{2})?(:?-\w*)?").unwrap();
+    let captures: Vec<String> = re.captures_iter(&package.tag).into_iter().map(|c| c[0].to_string()).collect();
     if captures.len() == 1 {
         let parts: Vec<_> = captures[0].split("-").collect();
         match parts.len() {
-            3 => Some(captures[0].clone()),
+            3 => {
+                if starts_with_number(&parts[2]) {
+                    Some(captures[0].clone())
+                } else {
+                    get_input_file_api_version(&package.input_files[0])
+                }
+            }
             4 => match parts[3] {
                 "preview" => Some(captures[0].clone()),
                 _ => None,
             },
             _ => None,
         }
+    } else {
+        None
+    }
+}
+
+pub fn get_input_file_api_version(input_file: &str) -> Option<String> {
+    let parts: Vec<_> = input_file.split("/").collect();
+    if parts.len() == 4 {
+        Some(parts[2].to_owned())
     } else {
         None
     }
@@ -185,11 +200,32 @@ mod tests {
     use super::{literate_config::*, *};
 
     #[test]
+    fn test_get_input_file_api_version() {
+        assert_eq!(
+            Some("2019-05-05-preview".to_owned()),
+            get_input_file_api_version("Microsoft.AlertsManagement/preview/2019-05-05-preview/ActionRules.json")
+        );
+    }
+
+    fn new_package_from_tag(tag: &str) -> Configuration {
+        Configuration {
+            tag: tag.to_owned(),
+            input_files: Vec::new(),
+        }
+    }
+
+    #[test]
     fn test_api_version_name() {
-        assert_eq!(Some("2019-06-01".to_owned()), to_api_version("package-2019-06-01"));
-        assert_eq!(Some("2019-06-01-preview".to_owned()), to_api_version("package-2019-06-01-preview"));
-        assert_eq!(None, to_api_version("package-2019-06-01-Disk"));
-        assert_eq!(None, to_api_version("package-2019-06-01-only"));
+        assert_eq!(
+            Some("2019-06-01".to_owned()),
+            to_api_version(&new_package_from_tag("package-2019-06-01"))
+        );
+        assert_eq!(
+            Some("2019-06-01-preview".to_owned()),
+            to_api_version(&new_package_from_tag("package-2019-06-01-preview"))
+        );
+        assert_eq!(None, to_api_version(&new_package_from_tag("package-2019-06-01-Disk")));
+        assert_eq!(None, to_api_version(&new_package_from_tag("package-2019-06-01-only")));
     }
 
     #[test]

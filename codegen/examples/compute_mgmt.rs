@@ -5,20 +5,159 @@ use autorust_codegen::{
     config_parser::{to_api_version, to_feature_name, to_mod_name},
     *,
 };
+use heck::SnakeCase;
+use std::{
+    collections::{HashMap, HashSet},
+    fs,
+};
+
+const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
+const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
+
+const SERVICE_NAMES: &[(&str, &str)] = &[("cosmos-db", "cosmos"), ("vmware", "avs")];
+
+const SKIP_SERVICES: &[&str] = &[
+    "EnterpriseKnowledgeGraph",     // Result<Error>
+    "addons",                       // missing files
+    "adhybridhealthservice",        // missing files
+    "alertsmanagement",             // missing files
+    "appconfiguration",             // codegen response wrong, Result<Error> does not serialize
+    "applicationinsights",          // missing files
+    "appplatform",                  // map_type
+    "authorization",                // missing files
+    "automanage",                   // missing "Configuration" https://github.com/Azure/azure-rest-api-specs/pull/11248
+    "automation",                   // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
+    "azure_kusto",                  // duplicate features in Cargo.toml
+    "azurestackhci",                // missing files
+    "batch",                        // missing API_VERSION
+    "botservice",                   // Result<Error>
+    "changeanalysis",               // Result<Error>
+    "cognitiveservices",            // codegen response wrong, Result<Error> does not serialize
+    "consumption",                  // missing files
+    "cosmos-db",                    // get_gremlin_graph_throughput defined twice
+    "cost-management",              // missing files
+    "customer-insights",            // missing files
+    "customproviders",              // properties::ProvisioningState in model not found
+    "databox",                      // missing files
+    "databoxedge",                  // duplicate model pub struct SkuCost {
+    "datamigration", // Error: "schema not found ../azure-rest-api-specs/specification/datamigration/resource-manager/Microsoft.DataMigration/preview/2018-07-15-preview/definitions/MigrateSqlServerSqlDbTask.json ValidationStatus"
+    "deploymentmanager", // missing params
+    "desktopvirtualization", // duplicate package in readme https://github.com/Azure/azure-rest-api-specs/pull/11252
+    "deviceprovisioningservices", // missing files
+    "dnc",           // conflicting implementation for `v2020_08_08_preview::models::ControllerDetails`
+    "domainservices", // missing files
+    "eventhub",      // missing files
+    "hardwaresecuritymodules", // missing files
+    "hdinsight",     // missing files
+    "healthcareapis", // Error: "schema not found ../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json Resource"
+    "hybridcompute",  // use of undeclared crate or module `status`
+    "hybriddatamanager", // missing files
+    "imagebuilder",   // missing files
+    "intune",         // codegen response wrong, Result<Error> does not serialize
+    "keyvault",       // defines Error, recursive type has infinite size
+    "labservices",    // missing files
+    "kubernetesconfiguration", // properties not defined
+    "maintenance",    // missing API_VERSION
+    "machinelearning", // missing params
+    "mariadb",        // Result<Configuration>
+    "managedservices", // registration_definition
+    "managementgroups", // missing files
+    "managementpartner", // missing files
+    "maps",           // missing files
+    "mediaservices",  // Error: Error("invalid unicode code point", line: 1380, column: 289)
+    "migrate",        // missing files
+    "migrateprojects", // missing files
+    "mixedreality",   // &AccountKeyRegenerateRequest not found in scope
+    "mysql",          // name clash on Configuration
+    "netapp",         // codegen wrong, missing operation params in function
+    "network",        // thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', codegen/src/codegen.rs:419:42
+    "notificationhubs", // missing files
+    "policyinsights", // missing files
+    "portal",         // Result<Error>
+    "postgresql",     // Result<Configuration>
+    "powerbiembedded", // missing files
+    "powerplatform", // Error: "parameter not found ../azure-rest-api-specs/specification/powerplatform/resource-manager/Microsoft.PowerPlatform/common/v1/definitions.json ResourceGroupNameParameter"
+    "privatedns",    // missing files
+    "recoveryservices", // missing files
+    "recoveryservicessiterecovery", // missing files
+    "redis",         // map_type
+    "relay",         // use of undeclared crate or module `properties`
+    "resourcehealth", // undeclared properties
+    "search",        // private_link_service_connection_state::Status
+    "security",      // missing files
+    "serialconsole", // missing files
+    "service-map", // thread 'main' panicked at '"Ref:machine" is not a valid Ident', /Users/cameron/.cargo/registry/src/github.com-1ecc6299db9ec823/proc-macro2-1.0.24/src/fallback.rs:693:9
+    "servicebus",  // properties::Action
+    "servicefabric", // {}/providers/Microsoft.ServiceFabric/operations list defined twice
+    "softwareplan", // Result<Error>
+    "storSimple1200Series", // missing files
+    "storagecache", // use of undeclared crate or module `properties`
+    "storageimportexport", // missing files
+    "sql",         // missing API_VERSION
+    "streamanalytics", // Result<Error>
+    "storsimple8000series", // missing files
+    "subscription", // missing files
+    "synapse",     // missing properties
+    "trafficmanager", // missing files
+    "web",         // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 1950, column: 5)
+    "windowsesu",  // missing properties
+];
 
 fn main() -> Result<()> {
-    let crate_name = "azure_mgmt_compute";
-    let md = "../azure-rest-api-specs/specification/compute/resource-manager/readme.md";
-    let output_folder = "../azure-sdk-for-rust/services/mgmt/compute";
+    let paths = fs::read_dir(SPEC_FOLDER).unwrap();
+    let mut spec_folders = Vec::new();
+    for path in paths {
+        let path = path?;
+        if path.file_type()?.is_dir() {
+            let file_name = path.file_name();
+            let spec_folder = file_name.to_str().ok_or("file name")?;
+            spec_folders.push(spec_folder.to_owned());
+        }
+    }
+    spec_folders.sort();
+    let skip_services: HashSet<&str> = SKIP_SERVICES.iter().cloned().collect();
+    for (i, spec_folder) in spec_folders.iter().enumerate() {
+        println!("{} {}", i + 1, spec_folder);
+        if !skip_services.contains(spec_folder.as_str()) {
+            gen_crate(spec_folder)?;
+        }
+    }
+    Ok(())
+}
 
+fn get_service_name(spec_folder: &str) -> String {
+    let service_names: HashMap<_, _> = SERVICE_NAMES.iter().cloned().collect();
+    if let Some(service_name) = service_names.get(spec_folder) {
+        service_name.to_string()
+    } else {
+        spec_folder.to_snake_case().replace("-", "_")
+    }
+}
+
+fn gen_crate(spec_folder: &str) -> Result<()> {
+    let spec_folder_full = path::join(SPEC_FOLDER, spec_folder)?;
+    let readme = &path::join(spec_folder_full, "resource-manager/readme.md")?;
+    if !readme.exists() {
+        println!("not found {:?}", readme);
+        return Ok(());
+    }
+
+    let service_name = &get_service_name(spec_folder);
+    println!("{} -> {}", spec_folder, service_name);
+    let crate_name = &format!("azure_mgmt_{}", service_name);
+    let output_folder = &path::join(OUTPUT_FOLDER, service_name)?;
     let src_folder = path::join(output_folder, "src")?;
-    let packages = config_parser::parse_configurations_from_autorest_config_file(md.into());
+    if src_folder.exists() {
+        fs::remove_dir_all(&src_folder)?;
+    }
+    fs::create_dir_all(&src_folder)?;
+    let packages = config_parser::parse_configurations_from_autorest_config_file(&readme);
     let mut feature_mod_names: Vec<(String, String)> = Vec::new();
     for package in packages {
         // println!("{}", &package.tag);
-        if let Some(api_version) = to_api_version(&package.tag) {
-            println!("{}", &package.tag);
-            // println!("  {}", api_version);
+        if let Some(api_version) = to_api_version(&package) {
+            println!("  {}", &package.tag);
+            println!("  {}", api_version);
             let feature_name = &to_feature_name(&package.tag);
             let mod_name = &to_mod_name(feature_name);
             feature_mod_names.push((feature_name.clone(), mod_name.clone()));
@@ -32,11 +171,11 @@ fn main() -> Result<()> {
             let input_files: Vec<_> = package
                 .input_files
                 .iter()
-                .map(|input_file| path::join(md, input_file).unwrap())
+                .map(|input_file| path::join(readme, input_file).unwrap())
                 .collect();
-            for input_file in &input_files {
-                println!("  {:?}", input_file);
-            }
+            // for input_file in &input_files {
+            //     println!("  {:?}", input_file);
+            // }
             run(Config {
                 api_version: Some(api_version),
                 output_folder: mod_output_folder.into(),
@@ -45,8 +184,12 @@ fn main() -> Result<()> {
         }
     }
 
-    cargo_toml::create(crate_name, &feature_mod_names, &path::join(output_folder, "Cargo.toml")?)?;
-    lib_rs::create(&feature_mod_names, &path::join(src_folder, "lib.rs")?)?;
+    cargo_toml::create(
+        crate_name,
+        &feature_mod_names,
+        &path::join(output_folder, "Cargo.toml").map_err(|_| "Cargo.toml")?,
+    )?;
+    lib_rs::create(&feature_mod_names, &path::join(src_folder, "lib.rs").map_err(|_| "lib.rs")?)?;
 
     Ok(())
 }
