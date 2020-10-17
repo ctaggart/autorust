@@ -1,4 +1,7 @@
-use crate::{codegen::ident, write_file};
+use crate::{
+    codegen::{create_generated_by_header, ident},
+    write_file,
+};
 use proc_macro2::TokenStream;
 use quote::quote;
 use std::path::Path;
@@ -21,7 +24,9 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> TokenStream {
             pub use #mod_name::{models, operations, API_VERSION};
         });
     }
+    let generated_by = create_generated_by_header();
     quote! {
+        #generated_by
         #cfgs
 
         pub type Error = Box<dyn std::error::Error + Send + Sync>;

@@ -1,4 +1,4 @@
-// cargo run --example compute_mgmt
+// cargo run --example gen_mgmt
 // https://github.com/Azure/azure-rest-api-specs/blob/master/specification/compute/resource-manager
 
 use autorust_codegen::{
@@ -72,6 +72,7 @@ const SKIP_SERVICES: &[&str] = &[
     "migrate",        // missing files
     "migrateprojects", // missing files
     "mixedreality",   // &AccountKeyRegenerateRequest not found in scope
+    "monitor",        // missing properties
     "mysql",          // name clash on Configuration
     "netapp",         // codegen wrong, missing operation params in function
     "network",        // thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', codegen/src/codegen.rs:419:42
