@@ -45,13 +45,11 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> TokenStream {
 
         impl Default for Configuration {
             fn default() -> Self {
-                {
-                    Self {
-                        api_version: API_VERSION.to_owned(),
-                        client: reqwest::Client::new(),
-                        base_path: "https://management.azure.com".to_owned(),
-                        bearer_access_token: None,
-                    }
+                Self {
+                    api_version: API_VERSION.to_owned(),
+                    client: reqwest::Client::new(),
+                    base_path: "https://management.azure.com".to_owned(),
+                    bearer_access_token: None,
                 }
             }
         }

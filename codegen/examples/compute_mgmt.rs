@@ -2,7 +2,7 @@
 // https://github.com/Azure/azure-rest-api-specs/blob/master/specification/compute/resource-manager
 
 use autorust_codegen::{
-    config_parser::{to_api_version, to_feature_name, to_mod_name},
+    config_parser::{to_api_version, to_mod_name},
     *,
 };
 use heck::SnakeCase;
@@ -17,29 +17,32 @@ const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 const SERVICE_NAMES: &[(&str, &str)] = &[("cosmos-db", "cosmos"), ("vmware", "avs")];
 
 const SKIP_SERVICES: &[&str] = &[
-    "EnterpriseKnowledgeGraph",     // Result<Error>
-    "addons",                       // missing files
-    "adhybridhealthservice",        // missing files
-    "alertsmanagement",             // missing files
-    "appconfiguration",             // codegen response wrong, Result<Error> does not serialize
-    "applicationinsights",          // missing files
-    "appplatform",                  // map_type
-    "authorization",                // missing files
-    "automanage",                   // missing "Configuration" https://github.com/Azure/azure-rest-api-specs/pull/11248
-    "automation",                   // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
-    "azure_kusto",                  // duplicate features in Cargo.toml
-    "azurestackhci",                // missing files
-    "batch",                        // missing API_VERSION
-    "botservice",                   // Result<Error>
-    "changeanalysis",               // Result<Error>
-    "cognitiveservices",            // codegen response wrong, Result<Error> does not serialize
-    "consumption",                  // missing files
-    "cosmos-db",                    // get_gremlin_graph_throughput defined twice
-    "cost-management",              // missing files
-    "customer-insights",            // missing files
-    "customproviders",              // properties::ProvisioningState in model not found
-    "databox",                      // missing files
-    "databoxedge",                  // duplicate model pub struct SkuCost {
+    "EnterpriseKnowledgeGraph", // Result<Error>
+    "addons",                   // missing files
+    "adhybridhealthservice",    // missing files
+    "alertsmanagement",         // missing files
+    "apimanagement",            // missing properties, all preview apis
+    "appconfiguration",         // codegen response wrong, Result<Error> does not serialize
+    "applicationinsights",      // missing files
+    "appplatform",              // map_type
+    "authorization",            // missing files
+    "automanage",               // missing "Configuration" https://github.com/Azure/azure-rest-api-specs/pull/11248
+    "automation",               // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
+    "azure_kusto",              // duplicate features in Cargo.toml
+    "azurestackhci",            // missing files
+    "batch",                    // missing API_VERSION
+    "botservice",               // Result<Error>
+    "changeanalysis",           // Result<Error>
+    "cognitiveservices",        // codegen response wrong, Result<Error> does not serialize
+    "consumption",              // missing files
+    "containerservice",         // missing generated Expander type
+    "cosmos-db",                // get_gremlin_graph_throughput defined twice
+    "cost-management",          // missing files
+    "customer-insights",        // missing files
+    "customproviders",          // properties::ProvisioningState in model not found
+    "databox",                  // missing files
+    "databoxedge",              // duplicate model pub struct SkuCost {
+    "datafactory",
     "datamigration", // Error: "schema not found ../azure-rest-api-specs/specification/datamigration/resource-manager/Microsoft.DataMigration/preview/2018-07-15-preview/definitions/MigrateSqlServerSqlDbTask.json ValidationStatus"
     "deploymentmanager", // missing params
     "desktopvirtualization", // duplicate package in readme https://github.com/Azure/azure-rest-api-specs/pull/11252
@@ -56,6 +59,7 @@ const SKIP_SERVICES: &[&str] = &[
     "intune",         // codegen response wrong, Result<Error> does not serialize
     "keyvault",       // defines Error, recursive type has infinite size
     "labservices",    // missing files
+    "logic",          // recursive type has infinite size
     "kubernetesconfiguration", // properties not defined
     "maintenance",    // missing API_VERSION
     "machinelearning", // missing params
@@ -101,6 +105,12 @@ const SKIP_SERVICES: &[&str] = &[
     "trafficmanager", // missing files
     "web",         // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 1950, column: 5)
     "windowsesu",  // missing properties
+];
+
+const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
+    ("azureactivedirectory", "package-preview-2020-07"),
+    ("resources", "package-policy-2020-03"),
+    ("recoveryservicesbackup", "package-2020-07"), // duplicate fn get_operation_status
 ];
 
 fn main() -> Result<()> {
@@ -153,15 +163,18 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
     fs::create_dir_all(&src_folder)?;
     let packages = config_parser::parse_configurations_from_autorest_config_file(&readme);
     let mut feature_mod_names: Vec<(String, String)> = Vec::new();
+    let skip_service_tags: HashSet<(&str, &str)> = SKIP_SERVICE_TAGS.iter().cloned().collect();
     for package in packages {
-        // println!("{}", &package.tag);
+        let tag = package.tag.as_str();
         if let Some(api_version) = to_api_version(&package) {
-            println!("  {}", &package.tag);
+            if skip_service_tags.contains(&(spec_folder, tag)) {
+                println!("  skipping {}", tag);
+                continue;
+            }
+            println!("  {}", tag);
             println!("  {}", api_version);
-            let feature_name = &to_feature_name(&package.tag);
-            let mod_name = &to_mod_name(feature_name);
-            feature_mod_names.push((feature_name.clone(), mod_name.clone()));
-            // println!("  {}", feature_name);
+            let mod_name = &to_mod_name(tag);
+            feature_mod_names.push((tag.to_string(), mod_name.clone()));
             println!("  {}", mod_name);
             let mod_output_folder = path::join(&src_folder, mod_name)?;
             println!("  {:?}", mod_output_folder);
@@ -183,7 +196,9 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
             })?;
         }
     }
-
+    if feature_mod_names.len() == 0 {
+        return Ok(());
+    }
     cargo_toml::create(
         crate_name,
         &feature_mod_names,

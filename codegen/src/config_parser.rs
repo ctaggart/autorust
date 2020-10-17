@@ -149,18 +149,12 @@ fn starts_with_number(text: &str) -> bool {
 /// Get an API Version from tag.
 /// It is a date in yyyy-mm-dd format followed by an optional "-preview".
 pub fn to_api_version(package: &Configuration) -> Option<String> {
-    let re = regex::Regex::new(r"\d{4}-\d{2}(:?-\d{2})?(:?-\w*)?").unwrap();
+    let re = regex::Regex::new(r"\d{4}-\d{2}-\d{2}(:?-\w*)?").unwrap();
     let captures: Vec<String> = re.captures_iter(&package.tag).into_iter().map(|c| c[0].to_string()).collect();
-    if captures.len() == 1 {
+    let api_version = if captures.len() == 1 {
         let parts: Vec<_> = captures[0].split("-").collect();
         match parts.len() {
-            3 => {
-                if starts_with_number(&parts[2]) {
-                    Some(captures[0].clone())
-                } else {
-                    get_input_file_api_version(&package.input_files[0])
-                }
-            }
+            3 => Some(captures[0].clone()),
             4 => match parts[3] {
                 "preview" => Some(captures[0].clone()),
                 _ => None,
@@ -169,6 +163,16 @@ pub fn to_api_version(package: &Configuration) -> Option<String> {
         }
     } else {
         None
+    };
+    match api_version {
+        Some(_) => api_version,
+        None => {
+            if package.input_files.len() > 0 {
+                get_input_file_api_version(&package.input_files[0])
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -179,11 +183,6 @@ pub fn get_input_file_api_version(input_file: &str) -> Option<String> {
     } else {
         None
     }
-}
-
-/// Create a Rust feature name based on the tag.
-pub fn to_feature_name(tag: &str) -> String {
-    tag.replace("package-", "")
 }
 
 /// Create a Rust module name, based on the feature naem.
@@ -226,11 +225,6 @@ mod tests {
         );
         assert_eq!(None, to_api_version(&new_package_from_tag("package-2019-06-01-Disk")));
         assert_eq!(None, to_api_version(&new_package_from_tag("package-2019-06-01-only")));
-    }
-
-    #[test]
-    fn test_feature_name() {
-        assert_eq!("2019-06", to_feature_name("package-2019-06"));
     }
 
     #[test]

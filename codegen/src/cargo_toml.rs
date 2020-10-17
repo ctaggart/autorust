@@ -34,7 +34,7 @@ tokio = {{ version = "0.2", features = ["macros"] }}
         if i == 0 {
             file.write_all(format!("default = [\"{}\"]\n", feature_name).as_bytes())?;
         }
-        file.write_all(format!("{} = []\n", feature_name).as_bytes())?;
+        file.write_all(format!("\"{}\" = []\n", feature_name).as_bytes())?;
     }
 
     Ok(())
