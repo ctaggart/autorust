@@ -1,10 +1,12 @@
+pub mod cargo_toml;
 mod codegen;
-mod config_parser;
+pub mod config_parser;
+pub mod lib_rs;
 pub mod path;
 mod reference;
 pub mod spec;
 pub use self::{
-    codegen::CodeGen,
+    codegen::{create_mod, CodeGen},
     reference::Reference,
     spec::{OperationVerb, ResolvedSchema, Spec},
 };
@@ -38,10 +40,16 @@ pub fn run(config: Config) -> Result<()> {
     let operations = cg.create_operations()?;
     let operations_path = path::join(&config.output_folder, "operations.rs")?;
     write_file(&operations_path, &operations)?;
+
+    if let Some(api_version) = &config.api_version {
+        let operations = create_mod(api_version);
+        let operations_path = path::join(&config.output_folder, "mod.rs")?;
+        write_file(&operations_path, &operations)?;
+    }
     Ok(())
 }
 
-fn write_file<P: AsRef<Path>>(path: P, tokens: &TokenStream) -> Result<()> {
+pub fn write_file<P: AsRef<Path>>(path: P, tokens: &TokenStream) -> Result<()> {
     println!("writing file {}", path.as_ref().display());
     let code = tokens.to_string();
     let mut buffer = File::create(path)?;

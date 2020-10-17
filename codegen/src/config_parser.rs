@@ -3,18 +3,18 @@ use serde::Deserialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct Configuration {
+pub struct Configuration {
     #[serde(rename(deserialize = "input-file"))]
-    input_files: Vec<String>,
+    pub input_files: Vec<String>,
 
     #[serde(skip_deserializing)]
-    tag: String,
+    pub tag: String,
 }
 
 /// Receives the AutoRest configuration file and parses it to its various configurations (by tags/API versions),
 /// according to its extension.
 /// e.g. for "path/to/config.md", it will get parsed as CommonMark [Literate Configuration](http://azure.github.io/autorest/user/literate-file-formats/configuration.html).
-pub(crate) fn parse_configurations_from_autorest_config_file(config_file: PathBuf) -> Vec<Configuration> {
+pub fn parse_configurations_from_autorest_config_file(config_file: &PathBuf) -> Vec<Configuration> {
     let extension = config_file.extension().expect(&format!(
         "Received AutoRest configuration file did not contain an expected extension (e.g. '.md'): '{0}'",
         config_file.as_path().to_str().unwrap()
@@ -48,7 +48,7 @@ mod literate_config {
     const LITERATE_CONFIGURATION_HEADING_TEXT: &str = "Configuration";
 
     // Prefix for level-3 headings (e.g. "### Tag: package-2018-01") which should contain YAML codeblocks containing the configurations.
-    const LITERATE_CONFIGURATION_TAG_PREFIX: &str = "Tag: package-";
+    const LITERATE_CONFIGURATION_TAG_PREFIX: &str = "Tag: ";
 
     /// Receives the configurations for all tags/versions from the received
     /// [Literate Configuration](http://azure.github.io/autorest/user/literate-file-formats/configuration.html) [CommonMark](https://commonmark.org/) file.
@@ -139,9 +139,99 @@ mod literate_config {
     }
 }
 
+fn starts_with_number(text: &str) -> bool {
+    match text.chars().next().unwrap_or_default() {
+        '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0' => true,
+        _ => false,
+    }
+}
+
+/// Get an API Version from tag.
+/// It is a date in yyyy-mm-dd format followed by an optional "-preview".
+pub fn to_api_version(package: &Configuration) -> Option<String> {
+    let re = regex::Regex::new(r"\d{4}-\d{2}-\d{2}(:?-\w*)?").unwrap();
+    let captures: Vec<String> = re.captures_iter(&package.tag).into_iter().map(|c| c[0].to_string()).collect();
+    let api_version = if captures.len() == 1 {
+        let parts: Vec<_> = captures[0].split("-").collect();
+        match parts.len() {
+            3 => Some(captures[0].clone()),
+            4 => match parts[3] {
+                "preview" => Some(captures[0].clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    } else {
+        None
+    };
+    match api_version {
+        Some(_) => api_version,
+        None => {
+            if package.input_files.len() > 0 {
+                get_input_file_api_version(&package.input_files[0])
+            } else {
+                None
+            }
+        }
+    }
+}
+
+pub fn get_input_file_api_version(input_file: &str) -> Option<String> {
+    let parts: Vec<_> = input_file.split("/").collect();
+    if parts.len() == 4 {
+        Some(parts[2].to_owned())
+    } else {
+        None
+    }
+}
+
+/// Create a Rust module name, based on the feature naem.
+pub fn to_mod_name(feature_name: &str) -> String {
+    let mut name = feature_name.to_owned();
+    if starts_with_number(&name) {
+        name = format!("v{}", &name);
+    }
+    name.replace("-", "_").to_lowercase()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{literate_config::*, *};
+
+    #[test]
+    fn test_get_input_file_api_version() {
+        assert_eq!(
+            Some("2019-05-05-preview".to_owned()),
+            get_input_file_api_version("Microsoft.AlertsManagement/preview/2019-05-05-preview/ActionRules.json")
+        );
+    }
+
+    fn new_package_from_tag(tag: &str) -> Configuration {
+        Configuration {
+            tag: tag.to_owned(),
+            input_files: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_api_version_name() {
+        assert_eq!(
+            Some("2019-06-01".to_owned()),
+            to_api_version(&new_package_from_tag("package-2019-06-01"))
+        );
+        assert_eq!(
+            Some("2019-06-01-preview".to_owned()),
+            to_api_version(&new_package_from_tag("package-2019-06-01-preview"))
+        );
+        assert_eq!(None, to_api_version(&new_package_from_tag("package-2019-06-01-Disk")));
+        assert_eq!(None, to_api_version(&new_package_from_tag("package-2019-06-01-only")));
+    }
+
+    #[test]
+    fn test_mod_name() {
+        assert_eq!("v2019_06", to_mod_name("2019-06"));
+        assert_eq!("v2018_10_01_disks", to_mod_name("2018-10-01-Disks"));
+    }
 
     #[test]
     fn literate_config_should_parse_one_configuration() {
@@ -163,7 +253,7 @@ input-file:
 ";
         let configurations = parse_configurations_from_cmark_config(input);
         assert_eq!(1, configurations.len());
-        assert_eq!("2019-06", configurations[0].tag);
+        assert_eq!("package-2019-06", configurations[0].tag);
         assert_eq!(5, configurations[0].input_files.len());
         assert_eq!("Microsoft.Storage/stable/2019-06-01/storage.json", configurations[0].input_files[0]);
         assert_eq!("Microsoft.Storage/stable/2019-06-01/blob.json", configurations[0].input_files[1]);
@@ -198,12 +288,12 @@ input-file:
 ";
         let configurations = parse_configurations_from_cmark_config(input);
         assert_eq!(2, configurations.len());
-        assert_eq!("2019-06", configurations[0].tag);
+        assert_eq!("package-2019-06", configurations[0].tag);
         assert_eq!(5, configurations[0].input_files.len());
         assert_eq!("Microsoft.Storage/stable/2019-06-01/storage.json", configurations[0].input_files[0]);
         assert_eq!("Microsoft.Storage/stable/2019-06-01/blob.json", configurations[0].input_files[1]);
 
-        assert_eq!("2015-05-preview", configurations[1].tag);
+        assert_eq!("package-2015-05-preview", configurations[1].tag);
         assert_eq!(1, configurations[1].input_files.len());
         assert_eq!(
             "Microsoft.Storage/preview/2015-05-01-preview/storage.json",
@@ -274,6 +364,6 @@ input-file:
 
         let configurations = parse_configurations_from_cmark_config(input);
         assert_eq!(1, configurations.len());
-        assert_eq!("2019-06", configurations[0].tag);
+        assert_eq!("package-2019-06", configurations[0].tag);
     }
 }
