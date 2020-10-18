@@ -1,5 +1,5 @@
 #![allow(unused_variables, dead_code)]
-use crate::{spec, Config, OperationVerb, Reference, ResolvedSchema, Result, Spec};
+use crate::{spec, Config, OperationVerb, Reference, ResolvedSchema, Spec};
 use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Schema};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
@@ -7,11 +7,20 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use regex::Regex;
 use serde_json::Value;
+use snafu::{OptionExt, ResultExt, Snafu};
 use spec::{get_api_schema_refs, get_schema_schema_refs, RefKey};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
 };
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+#[derive(Debug, Snafu)]
+pub enum Error {
+    SpecError { source: spec::Error },
+    ArrayExpectedToHaveItems,
+    NoNameForRef,
+}
 
 /// code generation context
 pub struct CodeGen {
@@ -21,7 +30,7 @@ pub struct CodeGen {
 
 impl CodeGen {
     pub fn new(config: Config) -> Result<Self> {
-        let spec = Spec::read_files(&config.input_files)?;
+        let spec = Spec::read_files(&config.input_files).context(SpecError)?;
         Ok(Self { config, spec })
     }
 
@@ -39,7 +48,7 @@ impl CodeGen {
 
     // For create_models. Recursively adds schema refs.
     fn add_schema_refs(&self, schemas: &mut IndexMap<RefKey, ResolvedSchema>, doc_file: &Path, schema_ref: &str) -> Result<()> {
-        let schema = self.spec.resolve_schema_ref(doc_file, schema_ref)?;
+        let schema = self.spec.resolve_schema_ref(doc_file, schema_ref).context(SpecError)?;
         if let Some(ref_key) = schema.ref_key.clone() {
             if !schemas.contains_key(&ref_key) {
                 if !self.spec.is_input_file(&ref_key.file) {
@@ -68,7 +77,7 @@ impl CodeGen {
         // all definitions from input_files
         for (doc_file, doc) in &self.spec.docs {
             if self.spec.is_input_file(doc_file) {
-                let schemas = self.spec.resolve_schema_map(doc_file, &doc.definitions)?;
+                let schemas = self.spec.resolve_schema_map(doc_file, &doc.definitions).context(SpecError)?;
                 for (name, schema) in schemas {
                     all_schemas.insert(
                         RefKey {
@@ -128,7 +137,7 @@ impl CodeGen {
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
         let mut modules: IndexMap<Option<String>, TokenStream> = IndexMap::new();
         for (doc_file, doc) in &self.spec.docs {
-            let paths = self.spec.resolve_path_map(doc_file, &doc.paths)?;
+            let paths = self.spec.resolve_path_map(doc_file, &doc.paths).context(SpecError)?;
             for (path, item) in &paths {
                 // println!("{}", path);
                 for op in spec::pathitem_operations(item) {
@@ -193,7 +202,10 @@ impl CodeGen {
             });
         }
 
-        let properties = self.spec.resolve_schema_map(doc_file, &schema.schema.properties)?;
+        let properties = self
+            .spec
+            .resolve_schema_map(doc_file, &schema.schema.properties)
+            .context(SpecError)?;
         for (property_name, property) in &properties {
             let nm = ident(&property_name.to_snake_case());
             let (mut field_tp_name, field_tp) = self.create_struct_field_type(doc_file, &ns, property_name, property)?;
@@ -299,7 +311,8 @@ fn get_schema_array_items(schema: &Schema) -> Result<&ReferenceOr<Schema>> {
         .items
         .as_ref()
         .as_ref()
-        .ok_or_else(|| format!("array expected to have items"))?)
+        // .ok_or_else(|| format!("array expected to have items"))?)
+        .context(ArrayExpectedToHaveItems)?)
 }
 
 pub fn create_generated_by_header() -> TokenStream {
@@ -536,8 +549,10 @@ fn get_type_name_for_schema(schema: &Schema) -> Result<TokenStream> {
 fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
     match schema {
         ReferenceOr::Reference { reference, .. } => {
-            let rf = Reference::parse(&reference)?;
-            let idt = ident(&rf.name.ok_or_else(|| format!("no name for ref {}", reference))?.to_camel_case());
+            let rf = Reference::parse(&reference);
+            // let idt = ident(&rf.name.ok_or_else(|| format!("no name for ref {}", reference))?.to_camel_case());
+            let name = &rf.name.context(NoNameForRef)?;
+            let idt = ident(&name.to_camel_case());
             Ok(quote! { #idt })
         }
         ReferenceOr::Item(schema) => get_type_name_for_schema(schema),
@@ -575,7 +590,10 @@ fn create_function(
 
     let fpath = format!("{{}}{}", &format_path(param_re, path));
 
-    let parameters: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &operation_verb.operation().parameters)?;
+    let parameters: Vec<Parameter> = cg
+        .spec
+        .resolve_parameters(doc_file, &operation_verb.operation().parameters)
+        .context(SpecError)?;
     let param_names: HashSet<_> = parameters.iter().map(|p| p.name.as_str()).collect();
     let has_param_api_version = param_names.contains("api-version");
     let mut skip = HashSet::new();

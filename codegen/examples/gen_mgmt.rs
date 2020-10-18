@@ -2,14 +2,18 @@
 // https://github.com/Azure/azure-rest-api-specs/blob/master/specification/compute/resource-manager
 
 use autorust_codegen::{
-    config_parser::{to_api_version, to_mod_name},
-    *,
+    cargo_toml,
+    config_parser::{self, to_api_version, to_mod_name},
+    lib_rs, path, run, Config,
 };
 use heck::SnakeCase;
 use std::{
     collections::{HashMap, HashSet},
     fs,
 };
+
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";

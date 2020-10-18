@@ -1,12 +1,18 @@
-use crate::Result;
+use snafu::{ResultExt, Snafu};
 use std::{
     fs::File,
     io::{prelude::*, LineWriter},
     path::Path,
 };
 
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+#[derive(Debug, Snafu)]
+pub enum Error {
+    IoError { source: std::io::Error },
+}
+
 pub fn create(crate_name: &str, feature_mod_names: &Vec<(String, String)>, path: &Path) -> Result<()> {
-    let file = File::create(path).map_err(|_| format!("create {:?}", path))?;
+    let file = File::create(path).context(IoError)?;
     let mut file = LineWriter::new(file);
     let version = &env!("CARGO_PKG_VERSION");
     file.write_all(
@@ -30,13 +36,14 @@ tokio = {{ version = "0.2", features = ["macros"] }}
             version, crate_name
         )
         .as_bytes(),
-    )?;
+    )
+    .context(IoError)?;
 
     let dft = get_default_feature(feature_mod_names);
-    file.write_all(format!("default = [\"{}\"]\n", dft).as_bytes())?;
+    file.write_all(format!("default = [\"{}\"]\n", dft).as_bytes()).context(IoError)?;
 
     for (feature_name, _mod_name) in feature_mod_names {
-        file.write_all(format!("\"{}\" = []\n", feature_name).as_bytes())?;
+        file.write_all(format!("\"{}\" = []\n", feature_name).as_bytes()).context(IoError)?;
     }
     Ok(())
 }

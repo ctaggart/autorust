@@ -1,6 +1,13 @@
-use crate::Result;
 use autorust_codegen::Config;
 use clap::{App, Arg, ArgMatches};
+use snafu::{OptionExt, Snafu};
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+#[derive(Debug, Snafu)]
+pub enum Error {
+    InputFileIsRequired,
+    OutputFolder,
+}
 
 const NAME: &str = env!("CARGO_PKG_NAME");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -17,10 +24,11 @@ pub fn config_try_new() -> Result<Config> {
 fn config_try_new_from_matches(arg_matches: &ArgMatches) -> Result<Config> {
     let input_files = arg_matches
         .values_of(INPUT_FILE)
-        .ok_or(INPUT_FILE)?
+        // .ok_or(INPUT_FILE)?
+        .context(InputFileIsRequired)?
         .map(|s| s.into())
         .collect::<Vec<_>>();
-    let output_folder = arg_matches.value_of(OUTPUT_FOLDER).ok_or(OUTPUT_FOLDER)?.to_owned().into();
+    let output_folder = arg_matches.value_of(OUTPUT_FOLDER).context(OutputFolder)?.to_owned().into();
     let api_version = arg_matches.value_of(API_VERSION).map(String::from);
     Ok(Config {
         input_files,
@@ -60,6 +68,9 @@ mod tests {
     use super::*;
     use clap::ErrorKind;
     use std::path::PathBuf;
+
+    pub type Error = Box<dyn std::error::Error + Send + Sync>;
+    pub type Result<T> = std::result::Result<T, Error>;
 
     #[test]
     fn missing_required() {

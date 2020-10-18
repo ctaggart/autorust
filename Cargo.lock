@@ -41,6 +41,7 @@ version = "0.1.0"
 dependencies = [
  "autorust_codegen",
  "clap 3.0.0-beta.2",
+ "snafu",
 ]
 
 [[package]]
@@ -58,6 +59,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "snafu",
 ]
 
 [[package]]
@@ -183,6 +185,12 @@ checksum = "f3d0c8c8752312f9713efd397ff63acb9f85585afbf179282e720e7704954dd5"
 dependencies = [
  "generic-array",
 ]
+
+[[package]]
+name = "doc-comment"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
 name = "dtoa"
@@ -475,6 +483,27 @@ name = "shell-words"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6fa3938c99da4914afedd13bf3d79bcb6c277d1b2c398d23257a304d9e1b074"
+
+[[package]]
+name = "snafu"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9c4e6046e4691afe918fd1b603fd6e515bcda5388a1092a9edbada307d159f09"
+dependencies = [
+ "doc-comment",
+ "snafu-derive",
+]
+
+[[package]]
+name = "snafu-derive"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7073448732a89f2f3e6581989106067f403d378faeafb4a50812eb814170d3e5"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "std_prelude"
