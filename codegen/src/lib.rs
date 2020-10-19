@@ -5,6 +5,7 @@ pub mod lib_rs;
 pub mod path;
 mod reference;
 pub mod spec;
+mod status_codes;
 pub use self::{
     codegen::{create_mod, CodeGen},
     reference::Reference,
@@ -17,6 +18,8 @@ use std::{
     io::prelude::*,
     path::PathBuf,
 };
+#[macro_use]
+extern crate lazy_static;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Snafu)]

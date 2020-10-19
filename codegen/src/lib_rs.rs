@@ -29,9 +29,6 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> TokenStream {
         #generated_by
         #cfgs
 
-        pub type Error = Box<dyn std::error::Error + Send + Sync>;
-        pub type Result<T> = std::result::Result<T, Error>;
-
         pub struct Configuration {
             pub api_version: String,
             pub client: reqwest::Client,

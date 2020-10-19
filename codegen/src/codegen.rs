@@ -1,6 +1,10 @@
 #![allow(unused_variables, dead_code)]
-use crate::{spec, Config, OperationVerb, Reference, ResolvedSchema, Spec};
-use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Schema};
+use crate::{
+    spec,
+    status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses},
+    Config, OperationVerb, Reference, ResolvedSchema, Spec,
+};
+use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Response, Schema};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
@@ -132,7 +136,7 @@ impl CodeGen {
             #![allow(unused_mut)]
             #![allow(unused_variables)]
             #![allow(unused_imports)]
-            use crate::{models::*, *};
+            use crate::{models::*};
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
         let mut modules: IndexMap<Option<String>, TokenStream> = IndexMap::new();
@@ -164,7 +168,9 @@ impl CodeGen {
                     let name = ident(&module_name);
                     file.extend(quote! {
                         pub mod #name {
-                            use crate::{models::*, *};
+                            use crate::{models::*};
+                            use reqwest::StatusCode;
+                            use snafu::{ResultExt, Snafu};
                             #module
                         }
                     });
@@ -504,7 +510,7 @@ fn create_function_params(cg: &CodeGen, doc_file: &Path, parameters: &Vec<Parame
         let tp = get_param_type(param)?;
         params.push(quote! { #name: #tp });
     }
-    let slf = quote! { configuration: &Configuration };
+    let slf = quote! { configuration: &crate::Configuration };
     params.insert(0, slf);
     Ok(quote! { #(#params),* })
 }
@@ -559,17 +565,25 @@ fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>) -> Result<TokenStr
     }
 }
 
-fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
-    // TODO error responses
-    // TODO union of responses
-    for (_http_code, rsp) in verb.operation().responses.iter() {
-        // println!("response key {:#?} {:#?}", key, rsp);
-        if let Some(schema) = &rsp.schema {
-            let tp = get_type_name_for_schema_ref(schema)?;
-            return Ok(quote! { Result<#tp> });
-        }
+// fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
+//     // TODO error responses
+//     // TODO union of responses
+//     for (_http_code, rsp) in verb.operation().responses.iter() {
+//         // println!("response key {:#?} {:#?}", key, rsp);
+//         if let Some(schema) = &rsp.schema {
+//             let tp = get_type_name_for_schema_ref(schema)?;
+//             return Ok(quote! { Result<#tp> });
+//         }
+//     }
+//     Ok(quote! { Result<()> })
+// }
+
+fn create_response_type(rsp: &Response) -> Result<TokenStream> {
+    if let Some(schema) = &rsp.schema {
+        Ok(get_type_name_for_schema_ref(schema)?)
+    } else {
+        Ok(quote! { () })
     }
-    Ok(quote! { Result<()> })
 }
 
 fn create_function(
@@ -605,7 +619,7 @@ fn create_function(
     let fparams = create_function_params(cg, doc_file, &parameters)?;
 
     // see if there is a body parameter
-    let fresponse = create_function_return(operation_verb)?;
+    // let fresponse = create_function_return(operation_verb)?;
 
     let client_verb = match operation_verb {
         OperationVerb::Get(_) => quote! { client.get(uri_str) },
@@ -697,17 +711,134 @@ fn create_function(
         }
     }
 
-    // TODO #17 decode the different errors depending on http status
-    // TODO #18 other callbacks like auth
+    let responses = &operation_verb.operation().responses;
+    let success_responses = get_success_responses(responses);
+    let error_responses = get_error_responses(responses);
+    let is_single_response = success_responses.len() == 1;
+    let fresponse = if is_single_response {
+        let tp = create_response_type(&success_responses[0])?;
+        quote! { std::result::Result<#tp, #fname::Error> }
+    } else {
+        quote! { std::result::Result<#fname::Response, #fname::Error> }
+    };
+
+    let mut response_enum = TokenStream::new();
+    if !is_single_response {
+        let mut success_responses_ts = TokenStream::new();
+        for (status_code, rsp) in &success_responses {
+            let tp = create_response_type(rsp)?;
+            let enum_type_name = ident(&get_response_type_name(status_code));
+            success_responses_ts.extend(quote! { #enum_type_name(#tp), })
+        }
+        response_enum.extend(quote! {
+            pub enum Response {
+                #success_responses_ts
+            }
+        });
+    }
+
+    let mut error_responses_ts = TokenStream::new();
+    for (status_code, rsp) in &error_responses {
+        let tp = create_response_type(rsp)?;
+        let response_type = &get_response_type_name(status_code);
+        if response_type == "DefaultErrorResponse" {
+            error_responses_ts.extend(quote! { DefaultErrorResponse { status_code: StatusCode, value: #tp }, });
+        } else {
+            error_responses_ts.extend(quote! { #response_type { status_code: StatusCode, value: #tp }, });
+        }
+    }
+
+    let mut match_status = TokenStream::new();
+    for (status_code, rsp) in &success_responses {
+        match status_code {
+            autorust_openapi::StatusCode::Code(_) => {
+                let tp = create_response_type(rsp)?;
+                let status_code_name = ident(&get_status_code_name(status_code));
+                let response_type_name = ident(&get_response_type_name(status_code));
+                if is_single_response {
+                    match_status.extend(quote! {
+                        StatusCode::#status_code_name => {
+                            let body = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                            let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                            Ok(rsp_value)
+                        }
+                    });
+                } else {
+                    match_status.extend(quote! {
+                        StatusCode::#status_code_name => {
+                            let body = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                            let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                            Ok(#fname::#response_type_name(rsp_value))
+                        }
+                    });
+                }
+            }
+            autorust_openapi::StatusCode::Default => {}
+        }
+    }
+    for (status_code, rsp) in &error_responses {
+        match status_code {
+            autorust_openapi::StatusCode::Code(_) => {
+                let tp = create_response_type(rsp)?;
+                let status_code_name = ident(&get_status_code_name(status_code));
+                let response_type_name = ident(&get_response_type_name(status_code));
+                match_status.extend(quote! {
+                    StatusCode::#status_code_name => {
+                        let body = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                        let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                        #fname::#response_type_name{value: rsp_value}.fail()
+                    }
+                });
+            }
+            autorust_openapi::StatusCode::Default => {}
+        }
+    }
+    // default must be last
+    for (status_code, rsp) in responses {
+        match status_code {
+            autorust_openapi::StatusCode::Code(_) => {}
+            autorust_openapi::StatusCode::Default => {
+                let tp = create_response_type(rsp)?;
+                let response_type_name = ident(&get_response_type_name(status_code));
+                match_status.extend(quote! {
+                    status_code => {
+                        let body = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                        let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                        #fname::DefaultErrorResponse{status_code, value: rsp_value}.fail()
+                    }
+                });
+            }
+        }
+    }
+
     let func = quote! {
         pub async fn #fname(#fparams) -> #fresponse {
             let client = &configuration.client;
             let uri_str = &format!(#fpath, &configuration.base_path, #uri_str_args);
             let mut req_builder = #client_verb;
             #ts_request_builder
-            let req = req_builder.build()?;
-            let res = client.execute(req).await?;
-            Ok(res.json().await?)
+            let req = req_builder.build().context(#fname::BuildRequestError)?;
+            let rsp = client.execute(req).await.context(#fname::ExecuteRequestError)?;
+            match rsp.status() {
+                #match_status
+            }
+        }
+        pub mod #fname {
+            use crate::models::*;
+            use reqwest::StatusCode;
+            use snafu::Snafu;
+
+            #response_enum
+
+            #[derive(Debug, Snafu)]
+            #[snafu(visibility(pub(crate)))]
+            pub enum Error {
+                #error_responses_ts
+                BuildRequestError { source: reqwest::Error },
+                ExecuteRequestError { source: reqwest::Error },
+                ResponseBytesError { source: reqwest::Error },
+                DeserializeError { source: serde_json::Error, body: bytes::Bytes },
+            }
         }
     };
     Ok(TokenStream::from(func))

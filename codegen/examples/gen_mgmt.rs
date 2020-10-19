@@ -7,6 +7,7 @@ use autorust_codegen::{
     lib_rs, path, run, Config,
 };
 use heck::SnakeCase;
+use indexmap::IndexSet;
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -19,6 +20,8 @@ const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
 const SERVICE_NAMES: &[(&str, &str)] = &[("cosmos-db", "cosmos"), ("vmware", "avs")];
+
+const ONLY_SERVICES: &[&str] = &["vmware"];
 
 const SKIP_SERVICES: &[&str] = &[
     "EnterpriseKnowledgeGraph", // Result<Error>
@@ -130,11 +133,19 @@ fn main() -> Result<()> {
         }
     }
     spec_folders.sort();
-    let skip_services: HashSet<&str> = SKIP_SERVICES.iter().cloned().collect();
-    for (i, spec_folder) in spec_folders.iter().enumerate() {
-        println!("{} {}", i + 1, spec_folder);
-        if !skip_services.contains(spec_folder.as_str()) {
+    let only_services: IndexSet<&str> = ONLY_SERVICES.iter().cloned().collect();
+    if only_services.len() > 0 {
+        for (i, spec_folder) in only_services.iter().enumerate() {
+            println!("{} {}", i + 1, spec_folder);
             gen_crate(spec_folder)?;
+        }
+    } else {
+        let skip_services: HashSet<&str> = SKIP_SERVICES.iter().cloned().collect();
+        for (i, spec_folder) in spec_folders.iter().enumerate() {
+            println!("{} {}", i + 1, spec_folder);
+            if !skip_services.contains(spec_folder.as_str()) {
+                gen_crate(spec_folder)?;
+            }
         }
     }
     Ok(())
