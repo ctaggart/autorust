@@ -221,7 +221,7 @@ pub fn get_response_type_name(status_code: &StatusCode) -> String {
             Ok(status_code) => get_response_name(&status_code),
             Err(_) => format!("StatusCode{}", status_code),
         },
-        StatusCode::Default => "DefaultErrorResponse".to_owned(),
+        StatusCode::Default => "DefaultResponse".to_owned(),
     }
 }
 
@@ -253,6 +253,16 @@ pub fn get_error_responses(responses: &IndexMap<StatusCode, Response>) -> IndexM
         }
     }
     map
+}
+
+pub fn has_default_response(responses: &IndexMap<StatusCode, Response>) -> bool {
+    for (status_code, _rsp) in responses {
+        match status_code {
+            StatusCode::Code(_) => {}
+            StatusCode::Default => return true,
+        }
+    }
+    false
 }
 
 #[cfg(test)]

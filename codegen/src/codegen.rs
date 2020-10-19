@@ -1,7 +1,7 @@
 #![allow(unused_variables, dead_code)]
 use crate::{
     spec,
-    status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses},
+    status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses, has_default_response},
     Config, OperationVerb, Reference, ResolvedSchema, Spec,
 };
 use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Response, Schema};
@@ -108,10 +108,10 @@ impl CodeGen {
             let doc_file = &ref_key.file;
             let schema_name = &ref_key.name;
             if let Some(first_doc_file) = schema_names.insert(schema_name, doc_file) {
-                eprintln!(
-                    "WARN schema {} already created from {:?}, duplicate from {:?}",
-                    schema_name, first_doc_file, doc_file
-                );
+                // eprintln!(
+                //     "WARN schema {} already created from {:?}, duplicate from {:?}",
+                //     schema_name, first_doc_file, doc_file
+                // );
             } else {
                 if is_schema_an_array(schema) {
                     file.extend(self.create_vec_alias(doc_file, schema_name, schema)?);
@@ -137,6 +137,8 @@ impl CodeGen {
             #![allow(unused_variables)]
             #![allow(unused_imports)]
             use crate::{models::*};
+            use reqwest::StatusCode;
+            use snafu::{ResultExt, Snafu};
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
         let mut modules: IndexMap<Option<String>, TokenStream> = IndexMap::new();
@@ -565,24 +567,11 @@ fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>) -> Result<TokenStr
     }
 }
 
-// fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
-//     // TODO error responses
-//     // TODO union of responses
-//     for (_http_code, rsp) in verb.operation().responses.iter() {
-//         // println!("response key {:#?} {:#?}", key, rsp);
-//         if let Some(schema) = &rsp.schema {
-//             let tp = get_type_name_for_schema_ref(schema)?;
-//             return Ok(quote! { Result<#tp> });
-//         }
-//     }
-//     Ok(quote! { Result<()> })
-// }
-
-fn create_response_type(rsp: &Response) -> Result<TokenStream> {
+fn create_response_type(rsp: &Response) -> Result<Option<TokenStream>> {
     if let Some(schema) = &rsp.schema {
-        Ok(get_type_name_for_schema_ref(schema)?)
+        Ok(Some(get_type_name_for_schema_ref(schema)?))
     } else {
-        Ok(quote! { () })
+        Ok(None)
     }
 }
 
@@ -715,8 +704,10 @@ fn create_function(
     let success_responses = get_success_responses(responses);
     let error_responses = get_error_responses(responses);
     let is_single_response = success_responses.len() == 1;
+    let has_default_response = has_default_response(responses);
+
     let fresponse = if is_single_response {
-        let tp = create_response_type(&success_responses[0])?;
+        let tp = create_response_type(&success_responses[0])?.unwrap_or(quote! { () });
         quote! { std::result::Result<#tp, #fname::Error> }
     } else {
         quote! { std::result::Result<#fname::Response, #fname::Error> }
@@ -727,10 +718,15 @@ fn create_function(
         let mut success_responses_ts = TokenStream::new();
         for (status_code, rsp) in &success_responses {
             let tp = create_response_type(rsp)?;
+            let tp = match tp {
+                Some(tp) => quote! { (#tp) },
+                None => quote! {},
+            };
             let enum_type_name = ident(&get_response_type_name(status_code));
-            success_responses_ts.extend(quote! { #enum_type_name(#tp), })
+            success_responses_ts.extend(quote! { #enum_type_name#tp, })
         }
         response_enum.extend(quote! {
+            #[derive(Debug)]
             pub enum Response {
                 #success_responses_ts
             }
@@ -740,12 +736,20 @@ fn create_function(
     let mut error_responses_ts = TokenStream::new();
     for (status_code, rsp) in &error_responses {
         let tp = create_response_type(rsp)?;
+        let tp = match tp {
+            Some(tp) => quote! { value: models::#tp, },
+            None => quote! {},
+        };
         let response_type = &get_response_type_name(status_code);
-        if response_type == "DefaultErrorResponse" {
-            error_responses_ts.extend(quote! { DefaultErrorResponse { status_code: StatusCode, value: #tp }, });
+        if response_type == "DefaultResponse" {
+            error_responses_ts.extend(quote! { DefaultResponse { status_code: StatusCode, #tp }, });
         } else {
-            error_responses_ts.extend(quote! { #response_type { status_code: StatusCode, value: #tp }, });
+            let response_type = ident(response_type);
+            error_responses_ts.extend(quote! { #response_type { #tp }, });
         }
+    }
+    if !has_default_response {
+        error_responses_ts.extend(quote! { UnexpectedResponse { status_code: StatusCode, body: bytes::Bytes }, });
     }
 
     let mut match_status = TokenStream::new();
@@ -756,21 +760,43 @@ fn create_function(
                 let status_code_name = ident(&get_status_code_name(status_code));
                 let response_type_name = ident(&get_response_type_name(status_code));
                 if is_single_response {
-                    match_status.extend(quote! {
-                        StatusCode::#status_code_name => {
-                            let body = rsp.bytes().await.context(#fname::ResponseBytesError)?;
-                            let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
-                            Ok(rsp_value)
+                    match tp {
+                        Some(tp) => {
+                            match_status.extend(quote! {
+                                StatusCode::#status_code_name => {
+                                    let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                                    let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                    Ok(rsp_value)
+                                }
+                            });
                         }
-                    });
+                        None => {
+                            match_status.extend(quote! {
+                                StatusCode::#status_code_name => {
+                                    Ok(())
+                                }
+                            });
+                        }
+                    }
                 } else {
-                    match_status.extend(quote! {
-                        StatusCode::#status_code_name => {
-                            let body = rsp.bytes().await.context(#fname::ResponseBytesError)?;
-                            let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
-                            Ok(#fname::#response_type_name(rsp_value))
+                    match tp {
+                        Some(tp) => {
+                            match_status.extend(quote! {
+                                StatusCode::#status_code_name => {
+                                    let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                                    let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                    Ok(#fname::Response::#response_type_name(rsp_value))
+                                }
+                            });
                         }
-                    });
+                        None => {
+                            match_status.extend(quote! {
+                                StatusCode::#status_code_name => {
+                                    Ok(#fname::Response::#response_type_name)
+                                }
+                            });
+                        }
+                    }
                 }
             }
             autorust_openapi::StatusCode::Default => {}
@@ -782,33 +808,64 @@ fn create_function(
                 let tp = create_response_type(rsp)?;
                 let status_code_name = ident(&get_status_code_name(status_code));
                 let response_type_name = ident(&get_response_type_name(status_code));
-                match_status.extend(quote! {
-                    StatusCode::#status_code_name => {
-                        let body = rsp.bytes().await.context(#fname::ResponseBytesError)?;
-                        let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
-                        #fname::#response_type_name{value: rsp_value}.fail()
+                match tp {
+                    Some(tp) => {
+                        match_status.extend(quote! {
+                            StatusCode::#status_code_name => {
+                                let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                                let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                #fname::#response_type_name{value: rsp_value}.fail()
+                            }
+                        });
                     }
-                });
+                    None => {
+                        match_status.extend(quote! {
+                            StatusCode::#status_code_name => {
+                                #fname::#response_type_name{}.fail()
+                            }
+                        });
+                    }
+                }
             }
             autorust_openapi::StatusCode::Default => {}
         }
     }
     // default must be last
-    for (status_code, rsp) in responses {
-        match status_code {
-            autorust_openapi::StatusCode::Code(_) => {}
-            autorust_openapi::StatusCode::Default => {
-                let tp = create_response_type(rsp)?;
-                let response_type_name = ident(&get_response_type_name(status_code));
-                match_status.extend(quote! {
-                    status_code => {
-                        let body = rsp.bytes().await.context(#fname::ResponseBytesError)?;
-                        let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
-                        #fname::DefaultErrorResponse{status_code, value: rsp_value}.fail()
+    if has_default_response {
+        for (status_code, rsp) in responses {
+            match status_code {
+                autorust_openapi::StatusCode::Code(_) => {}
+                autorust_openapi::StatusCode::Default => {
+                    let tp = create_response_type(rsp)?;
+                    let response_type_name = ident(&get_response_type_name(status_code));
+                    match tp {
+                        Some(tp) => {
+                            match_status.extend(quote! {
+                                status_code => {
+                                    let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                                    let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                    #fname::DefaultResponse{status_code, value: rsp_value}.fail()
+                                }
+                            });
+                        }
+                        None => {
+                            match_status.extend(quote! {
+                                status_code => {
+                                    #fname::DefaultResponse{status_code}.fail()
+                                }
+                            });
+                        }
                     }
-                });
+                }
             }
         }
+    } else {
+        match_status.extend(quote! {
+            status_code => {
+                let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                #fname::UnexpectedResponse{status_code, body: body}.fail()
+            }
+        });
     }
 
     let func = quote! {
@@ -824,7 +881,7 @@ fn create_function(
             }
         }
         pub mod #fname {
-            use crate::models::*;
+            use crate::{models, models::*};
             use reqwest::StatusCode;
             use snafu::Snafu;
 

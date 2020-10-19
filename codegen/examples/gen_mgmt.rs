@@ -21,7 +21,13 @@ const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
 const SERVICE_NAMES: &[(&str, &str)] = &[("cosmos-db", "cosmos"), ("vmware", "avs")];
 
-const ONLY_SERVICES: &[&str] = &["vmware"];
+const ONLY_SERVICES: &[&str] = &[
+    // "vmware",
+    // "resources",
+    // "scheduler",
+    // "cloudshell",
+    // "reservations",
+    ];
 
 const SKIP_SERVICES: &[&str] = &[
     "EnterpriseKnowledgeGraph", // Result<Error>
@@ -169,7 +175,7 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
     }
 
     let service_name = &get_service_name(spec_folder);
-    println!("{} -> {}", spec_folder, service_name);
+    // println!("{} -> {}", spec_folder, service_name);
     let crate_name = &format!("azure_mgmt_{}", service_name);
     let output_folder = &path::join(OUTPUT_FOLDER, service_name)?;
     let src_folder = path::join(output_folder, "src")?;
@@ -184,16 +190,16 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
         let tag = package.tag.as_str();
         if let Some(api_version) = to_api_version(&package) {
             if skip_service_tags.contains(&(spec_folder, tag)) {
-                println!("  skipping {}", tag);
+                // println!("  skipping {}", tag);
                 continue;
             }
-            println!("  {}", tag);
-            println!("  {}", api_version);
+            // println!("  {}", tag);
+            // println!("  {}", api_version);
             let mod_name = &to_mod_name(tag);
             feature_mod_names.push((tag.to_string(), mod_name.clone()));
-            println!("  {}", mod_name);
+            // println!("  {}", mod_name);
             let mod_output_folder = path::join(&src_folder, mod_name)?;
-            println!("  {:?}", mod_output_folder);
+            // println!("  {:?}", mod_output_folder);
             // for input_file in &package.input_files {
             //     println!("  {}", input_file);
             // }
