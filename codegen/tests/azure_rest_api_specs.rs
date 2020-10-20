@@ -6,6 +6,9 @@ use autorust_codegen::*;
 use spec::RefString;
 use std::path::PathBuf;
 
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[test]
 fn refs_count_security_common() -> Result<()> {
     let api = &spec::read_api_file("../../azure-rest-api-specs/specification/security/resource-manager/common/v1/types.json")?;

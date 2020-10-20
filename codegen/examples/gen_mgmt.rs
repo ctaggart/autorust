@@ -2,108 +2,85 @@
 // https://github.com/Azure/azure-rest-api-specs/blob/master/specification/compute/resource-manager
 
 use autorust_codegen::{
-    config_parser::{to_api_version, to_mod_name},
-    *,
+    cargo_toml,
+    config_parser::{self, to_api_version, to_mod_name},
+    lib_rs, path, run, Config,
 };
 use heck::SnakeCase;
+use indexmap::IndexSet;
 use std::{
     collections::{HashMap, HashSet},
     fs,
 };
+
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
 const SERVICE_NAMES: &[(&str, &str)] = &[("cosmos-db", "cosmos"), ("vmware", "avs")];
 
+const ONLY_SERVICES: &[&str] = &[
+    // "vmware",
+    // "resources",
+    // "scheduler",
+    // "cloudshell",
+    // "reservations",
+    // "addons",
+    ];
+
 const SKIP_SERVICES: &[&str] = &[
-    "EnterpriseKnowledgeGraph", // Result<Error>
-    "addons",                   // missing files
-    "adhybridhealthservice",    // missing files
-    "alertsmanagement",         // missing files
-    "apimanagement",            // missing properties, all preview apis
-    "appconfiguration",         // codegen response wrong, Result<Error> does not serialize
-    "applicationinsights",      // missing files
-    "appplatform",              // map_type
-    "authorization",            // missing files
-    "automanage",               // missing "Configuration" https://github.com/Azure/azure-rest-api-specs/pull/11248
-    "automation",               // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
-    "azure_kusto",              // duplicate features in Cargo.toml
-    "azurestackhci",            // missing files
-    "batch",                    // missing API_VERSION
-    "botservice",               // Result<Error>
-    "changeanalysis",           // Result<Error>
-    "cognitiveservices",        // codegen response wrong, Result<Error> does not serialize
-    "consumption",              // missing files
-    "containerservice",         // missing generated Expander type
-    "cosmos-db",                // get_gremlin_graph_throughput defined twice
-    "cost-management",          // missing files
-    "customer-insights",        // missing files
-    "customproviders",          // properties::ProvisioningState in model not found
-    "databox",                  // missing files
-    "databoxedge",              // duplicate model pub struct SkuCost {
+    "apimanagement",     // missing properties, all preview apis
+    "appconfiguration",  // codegen response wrong, Result<Error> does not serialize
+    "appplatform",       // map_type
+    "automation",        // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
+    "azure_kusto",       // duplicate features in Cargo.toml
+    "batch",             // missing API_VERSION
+    "cognitiveservices", // codegen response wrong, Result<Error> does not serialize
+    "containerservice",  // missing generated Expander type
+    "cosmos-db",         // get_gremlin_graph_throughput defined twice
+    "cost-management",   // use of undeclared crate or module `definition`
+    "customproviders",   // properties::ProvisioningState in model not found
+    "databox",           // recursive type has infinite size
+    "databoxedge",       // duplicate model pub struct SkuCost {
     "datafactory",
     "datamigration", // Error: "schema not found ../azure-rest-api-specs/specification/datamigration/resource-manager/Microsoft.DataMigration/preview/2018-07-15-preview/definitions/MigrateSqlServerSqlDbTask.json ValidationStatus"
     "deploymentmanager", // missing params
-    "desktopvirtualization", // duplicate package in readme https://github.com/Azure/azure-rest-api-specs/pull/11252
     "deviceprovisioningservices", // missing files
     "dnc",           // conflicting implementation for `v2020_08_08_preview::models::ControllerDetails`
-    "domainservices", // missing files
-    "eventhub",      // missing files
-    "hardwaresecuritymodules", // missing files
-    "hdinsight",     // missing files
+    "hardwaresecuritymodules", // recursive without indirection on Error
     "healthcareapis", // Error: "schema not found ../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json Resource"
     "hybridcompute",  // use of undeclared crate or module `status`
-    "hybriddatamanager", // missing files
-    "imagebuilder",   // missing files
     "intune",         // codegen response wrong, Result<Error> does not serialize
     "keyvault",       // defines Error, recursive type has infinite size
-    "labservices",    // missing files
     "logic",          // recursive type has infinite size
     "kubernetesconfiguration", // properties not defined
     "maintenance",    // missing API_VERSION
     "machinelearning", // missing params
     "mariadb",        // Result<Configuration>
     "managedservices", // registration_definition
-    "managementgroups", // missing files
-    "managementpartner", // missing files
-    "maps",           // missing files
     "mediaservices",  // Error: Error("invalid unicode code point", line: 1380, column: 289)
-    "migrate",        // missing files
-    "migrateprojects", // missing files
+    "migrateprojects", // recursive type has infinite size
     "mixedreality",   // &AccountKeyRegenerateRequest not found in scope
     "monitor",        // missing properties
-    "mysql",          // name clash on Configuration
+    "mysql",          // Ok200(Configuration)
     "netapp",         // codegen wrong, missing operation params in function
     "network",        // thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', codegen/src/codegen.rs:419:42
-    "notificationhubs", // missing files
-    "policyinsights", // missing files
-    "portal",         // Result<Error>
-    "postgresql",     // Result<Configuration>
-    "powerbiembedded", // missing files
+    "portal",         // Ok200(Configuration)
+    "postgresql",     // Configuration
     "powerplatform", // Error: "parameter not found ../azure-rest-api-specs/specification/powerplatform/resource-manager/Microsoft.PowerPlatform/common/v1/definitions.json ResourceGroupNameParameter"
-    "privatedns",    // missing files
-    "recoveryservices", // missing files
-    "recoveryservicessiterecovery", // missing files
+    "recoveryservicessiterecovery", // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
     "redis",         // map_type
     "relay",         // use of undeclared crate or module `properties`
     "resourcehealth", // undeclared properties
     "search",        // private_link_service_connection_state::Status
-    "security",      // missing files
-    "serialconsole", // missing files
     "service-map", // thread 'main' panicked at '"Ref:machine" is not a valid Ident', /Users/cameron/.cargo/registry/src/github.com-1ecc6299db9ec823/proc-macro2-1.0.24/src/fallback.rs:693:9
     "servicebus",  // properties::Action
     "servicefabric", // {}/providers/Microsoft.ServiceFabric/operations list defined twice
     "softwareplan", // Result<Error>
-    "storSimple1200Series", // missing files
     "storagecache", // use of undeclared crate or module `properties`
-    "storageimportexport", // missing files
-    "sql",         // missing API_VERSION
-    "streamanalytics", // Result<Error>
-    "storsimple8000series", // missing files
-    "subscription", // missing files
     "synapse",     // missing properties
-    "trafficmanager", // missing files
     "web",         // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 1950, column: 5)
     "windowsesu",  // missing properties
 ];
@@ -126,11 +103,19 @@ fn main() -> Result<()> {
         }
     }
     spec_folders.sort();
-    let skip_services: HashSet<&str> = SKIP_SERVICES.iter().cloned().collect();
-    for (i, spec_folder) in spec_folders.iter().enumerate() {
-        println!("{} {}", i + 1, spec_folder);
-        if !skip_services.contains(spec_folder.as_str()) {
+    let only_services: IndexSet<&str> = ONLY_SERVICES.iter().cloned().collect();
+    if only_services.len() > 0 {
+        for (i, spec_folder) in only_services.iter().enumerate() {
+            println!("{} {}", i + 1, spec_folder);
             gen_crate(spec_folder)?;
+        }
+    } else {
+        let skip_services: HashSet<&str> = SKIP_SERVICES.iter().cloned().collect();
+        for (i, spec_folder) in spec_folders.iter().enumerate() {
+            println!("{} {}", i + 1, spec_folder);
+            if !skip_services.contains(spec_folder.as_str()) {
+                gen_crate(spec_folder)?;
+            }
         }
     }
     Ok(())
@@ -154,14 +139,14 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
     }
 
     let service_name = &get_service_name(spec_folder);
-    println!("{} -> {}", spec_folder, service_name);
+    // println!("{} -> {}", spec_folder, service_name);
     let crate_name = &format!("azure_mgmt_{}", service_name);
     let output_folder = &path::join(OUTPUT_FOLDER, service_name)?;
     let src_folder = path::join(output_folder, "src")?;
     if src_folder.exists() {
         fs::remove_dir_all(&src_folder)?;
     }
-    fs::create_dir_all(&src_folder)?;
+    // fs::create_dir_all(&src_folder)?;
     let packages = config_parser::parse_configurations_from_autorest_config_file(&readme);
     let mut feature_mod_names: Vec<(String, String)> = Vec::new();
     let skip_service_tags: HashSet<(&str, &str)> = SKIP_SERVICE_TAGS.iter().cloned().collect();
@@ -169,16 +154,16 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
         let tag = package.tag.as_str();
         if let Some(api_version) = to_api_version(&package) {
             if skip_service_tags.contains(&(spec_folder, tag)) {
-                println!("  skipping {}", tag);
+                // println!("  skipping {}", tag);
                 continue;
             }
-            println!("  {}", tag);
-            println!("  {}", api_version);
+            // println!("  {}", tag);
+            // println!("  {}", api_version);
             let mod_name = &to_mod_name(tag);
             feature_mod_names.push((tag.to_string(), mod_name.clone()));
-            println!("  {}", mod_name);
+            // println!("  {}", mod_name);
             let mod_output_folder = path::join(&src_folder, mod_name)?;
-            println!("  {:?}", mod_output_folder);
+            // println!("  {:?}", mod_output_folder);
             // for input_file in &package.input_files {
             //     println!("  {}", input_file);
             // }

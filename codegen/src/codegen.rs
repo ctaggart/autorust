@@ -1,17 +1,30 @@
 #![allow(unused_variables, dead_code)]
-use crate::{spec, Config, OperationVerb, Reference, ResolvedSchema, Result, Spec};
-use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Schema};
+use crate::{
+    spec,
+    status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses, has_default_response},
+    Config, OperationVerb, Reference, ResolvedSchema, Spec,
+};
+use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Response, Schema};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote, ToTokens};
 use regex::Regex;
 use serde_json::Value;
+use snafu::{OptionExt, ResultExt, Snafu};
 use spec::{get_api_schema_refs, get_schema_schema_refs, RefKey};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
 };
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+#[derive(Debug, Snafu)]
+pub enum Error {
+    SpecError { source: spec::Error },
+    ArrayExpectedToHaveItems,
+    NoNameForRef,
+}
 
 /// code generation context
 pub struct CodeGen {
@@ -21,7 +34,7 @@ pub struct CodeGen {
 
 impl CodeGen {
     pub fn new(config: Config) -> Result<Self> {
-        let spec = Spec::read_files(&config.input_files)?;
+        let spec = Spec::read_files(&config.input_files).context(SpecError)?;
         Ok(Self { config, spec })
     }
 
@@ -39,7 +52,7 @@ impl CodeGen {
 
     // For create_models. Recursively adds schema refs.
     fn add_schema_refs(&self, schemas: &mut IndexMap<RefKey, ResolvedSchema>, doc_file: &Path, schema_ref: &str) -> Result<()> {
-        let schema = self.spec.resolve_schema_ref(doc_file, schema_ref)?;
+        let schema = self.spec.resolve_schema_ref(doc_file, schema_ref).context(SpecError)?;
         if let Some(ref_key) = schema.ref_key.clone() {
             if !schemas.contains_key(&ref_key) {
                 if !self.spec.is_input_file(&ref_key.file) {
@@ -68,7 +81,7 @@ impl CodeGen {
         // all definitions from input_files
         for (doc_file, doc) in &self.spec.docs {
             if self.spec.is_input_file(doc_file) {
-                let schemas = self.spec.resolve_schema_map(doc_file, &doc.definitions)?;
+                let schemas = self.spec.resolve_schema_map(doc_file, &doc.definitions).context(SpecError)?;
                 for (name, schema) in schemas {
                     all_schemas.insert(
                         RefKey {
@@ -95,10 +108,10 @@ impl CodeGen {
             let doc_file = &ref_key.file;
             let schema_name = &ref_key.name;
             if let Some(first_doc_file) = schema_names.insert(schema_name, doc_file) {
-                eprintln!(
-                    "WARN schema {} already created from {:?}, duplicate from {:?}",
-                    schema_name, first_doc_file, doc_file
-                );
+                // eprintln!(
+                //     "WARN schema {} already created from {:?}, duplicate from {:?}",
+                //     schema_name, first_doc_file, doc_file
+                // );
             } else {
                 if is_schema_an_array(schema) {
                     file.extend(self.create_vec_alias(doc_file, schema_name, schema)?);
@@ -123,12 +136,14 @@ impl CodeGen {
             #![allow(unused_mut)]
             #![allow(unused_variables)]
             #![allow(unused_imports)]
-            use crate::{models::*, *};
+            use crate::{models::*};
+            use reqwest::StatusCode;
+            use snafu::{ResultExt, Snafu};
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
         let mut modules: IndexMap<Option<String>, TokenStream> = IndexMap::new();
         for (doc_file, doc) in &self.spec.docs {
-            let paths = self.spec.resolve_path_map(doc_file, &doc.paths)?;
+            let paths = self.spec.resolve_path_map(doc_file, &doc.paths).context(SpecError)?;
             for (path, item) in &paths {
                 // println!("{}", path);
                 for op in spec::pathitem_operations(item) {
@@ -155,7 +170,9 @@ impl CodeGen {
                     let name = ident(&module_name);
                     file.extend(quote! {
                         pub mod #name {
-                            use crate::{models::*, *};
+                            use crate::{models::*};
+                            use reqwest::StatusCode;
+                            use snafu::{ResultExt, Snafu};
                             #module
                         }
                     });
@@ -193,7 +210,10 @@ impl CodeGen {
             });
         }
 
-        let properties = self.spec.resolve_schema_map(doc_file, &schema.schema.properties)?;
+        let properties = self
+            .spec
+            .resolve_schema_map(doc_file, &schema.schema.properties)
+            .context(SpecError)?;
         for (property_name, property) in &properties {
             let nm = ident(&property_name.to_snake_case());
             let (mut field_tp_name, field_tp) = self.create_struct_field_type(doc_file, &ns, property_name, property)?;
@@ -299,7 +319,8 @@ fn get_schema_array_items(schema: &Schema) -> Result<&ReferenceOr<Schema>> {
         .items
         .as_ref()
         .as_ref()
-        .ok_or_else(|| format!("array expected to have items"))?)
+        // .ok_or_else(|| format!("array expected to have items"))?)
+        .context(ArrayExpectedToHaveItems)?)
 }
 
 pub fn create_generated_by_header() -> TokenStream {
@@ -491,7 +512,7 @@ fn create_function_params(cg: &CodeGen, doc_file: &Path, parameters: &Vec<Parame
         let tp = get_param_type(param)?;
         params.push(quote! { #name: #tp });
     }
-    let slf = quote! { configuration: &Configuration };
+    let slf = quote! { configuration: &crate::Configuration };
     params.insert(0, slf);
     Ok(quote! { #(#params),* })
 }
@@ -536,25 +557,22 @@ fn get_type_name_for_schema(schema: &Schema) -> Result<TokenStream> {
 fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
     match schema {
         ReferenceOr::Reference { reference, .. } => {
-            let rf = Reference::parse(&reference)?;
-            let idt = ident(&rf.name.ok_or_else(|| format!("no name for ref {}", reference))?.to_camel_case());
+            let rf = Reference::parse(&reference);
+            // let idt = ident(&rf.name.ok_or_else(|| format!("no name for ref {}", reference))?.to_camel_case());
+            let name = &rf.name.context(NoNameForRef)?;
+            let idt = ident(&name.to_camel_case());
             Ok(quote! { #idt })
         }
         ReferenceOr::Item(schema) => get_type_name_for_schema(schema),
     }
 }
 
-fn create_function_return(verb: &OperationVerb) -> Result<TokenStream> {
-    // TODO error responses
-    // TODO union of responses
-    for (_http_code, rsp) in verb.operation().responses.iter() {
-        // println!("response key {:#?} {:#?}", key, rsp);
-        if let Some(schema) = &rsp.schema {
-            let tp = get_type_name_for_schema_ref(schema)?;
-            return Ok(quote! { Result<#tp> });
-        }
+fn create_response_type(rsp: &Response) -> Result<Option<TokenStream>> {
+    if let Some(schema) = &rsp.schema {
+        Ok(Some(get_type_name_for_schema_ref(schema)?))
+    } else {
+        Ok(None)
     }
-    Ok(quote! { Result<()> })
 }
 
 fn create_function(
@@ -575,7 +593,10 @@ fn create_function(
 
     let fpath = format!("{{}}{}", &format_path(param_re, path));
 
-    let parameters: Vec<Parameter> = cg.spec.resolve_parameters(doc_file, &operation_verb.operation().parameters)?;
+    let parameters: Vec<Parameter> = cg
+        .spec
+        .resolve_parameters(doc_file, &operation_verb.operation().parameters)
+        .context(SpecError)?;
     let param_names: HashSet<_> = parameters.iter().map(|p| p.name.as_str()).collect();
     let has_param_api_version = param_names.contains("api-version");
     let mut skip = HashSet::new();
@@ -587,7 +608,7 @@ fn create_function(
     let fparams = create_function_params(cg, doc_file, &parameters)?;
 
     // see if there is a body parameter
-    let fresponse = create_function_return(operation_verb)?;
+    // let fresponse = create_function_return(operation_verb)?;
 
     let client_verb = match operation_verb {
         OperationVerb::Get(_) => quote! { client.get(uri_str) },
@@ -679,17 +700,202 @@ fn create_function(
         }
     }
 
-    // TODO #17 decode the different errors depending on http status
-    // TODO #18 other callbacks like auth
+    let responses = &operation_verb.operation().responses;
+    let success_responses = get_success_responses(responses);
+    let error_responses = get_error_responses(responses);
+    let is_single_response = success_responses.len() == 1;
+    let has_default_response = has_default_response(responses);
+
+    let fresponse = if is_single_response {
+        let tp = create_response_type(&success_responses[0])?.unwrap_or(quote! { () });
+        quote! { std::result::Result<#tp, #fname::Error> }
+    } else {
+        quote! { std::result::Result<#fname::Response, #fname::Error> }
+    };
+
+    let mut response_enum = TokenStream::new();
+    if !is_single_response {
+        let mut success_responses_ts = TokenStream::new();
+        for (status_code, rsp) in &success_responses {
+            let tp = create_response_type(rsp)?;
+            let tp = match tp {
+                Some(tp) => quote! { (#tp) },
+                None => quote! {},
+            };
+            let enum_type_name = ident(&get_response_type_name(status_code));
+            success_responses_ts.extend(quote! { #enum_type_name#tp, })
+        }
+        response_enum.extend(quote! {
+            #[derive(Debug)]
+            pub enum Response {
+                #success_responses_ts
+            }
+        });
+    }
+
+    let mut error_responses_ts = TokenStream::new();
+    for (status_code, rsp) in &error_responses {
+        let tp = create_response_type(rsp)?;
+        let tp = match tp {
+            Some(tp) => quote! { value: models::#tp, },
+            None => quote! {},
+        };
+        let response_type = &get_response_type_name(status_code);
+        if response_type == "DefaultResponse" {
+            error_responses_ts.extend(quote! { DefaultResponse { status_code: StatusCode, #tp }, });
+        } else {
+            let response_type = ident(response_type);
+            error_responses_ts.extend(quote! { #response_type { #tp }, });
+        }
+    }
+    if !has_default_response {
+        error_responses_ts.extend(quote! { UnexpectedResponse { status_code: StatusCode, body: bytes::Bytes }, });
+    }
+
+    let mut match_status = TokenStream::new();
+    for (status_code, rsp) in &success_responses {
+        match status_code {
+            autorust_openapi::StatusCode::Code(_) => {
+                let tp = create_response_type(rsp)?;
+                let status_code_name = ident(&get_status_code_name(status_code));
+                let response_type_name = ident(&get_response_type_name(status_code));
+                if is_single_response {
+                    match tp {
+                        Some(tp) => {
+                            match_status.extend(quote! {
+                                StatusCode::#status_code_name => {
+                                    let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                                    let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                    Ok(rsp_value)
+                                }
+                            });
+                        }
+                        None => {
+                            match_status.extend(quote! {
+                                StatusCode::#status_code_name => {
+                                    Ok(())
+                                }
+                            });
+                        }
+                    }
+                } else {
+                    match tp {
+                        Some(tp) => {
+                            match_status.extend(quote! {
+                                StatusCode::#status_code_name => {
+                                    let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                                    let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                    Ok(#fname::Response::#response_type_name(rsp_value))
+                                }
+                            });
+                        }
+                        None => {
+                            match_status.extend(quote! {
+                                StatusCode::#status_code_name => {
+                                    Ok(#fname::Response::#response_type_name)
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            autorust_openapi::StatusCode::Default => {}
+        }
+    }
+    for (status_code, rsp) in &error_responses {
+        match status_code {
+            autorust_openapi::StatusCode::Code(_) => {
+                let tp = create_response_type(rsp)?;
+                let status_code_name = ident(&get_status_code_name(status_code));
+                let response_type_name = ident(&get_response_type_name(status_code));
+                match tp {
+                    Some(tp) => {
+                        match_status.extend(quote! {
+                            StatusCode::#status_code_name => {
+                                let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                                let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                #fname::#response_type_name{value: rsp_value}.fail()
+                            }
+                        });
+                    }
+                    None => {
+                        match_status.extend(quote! {
+                            StatusCode::#status_code_name => {
+                                #fname::#response_type_name{}.fail()
+                            }
+                        });
+                    }
+                }
+            }
+            autorust_openapi::StatusCode::Default => {}
+        }
+    }
+    // default must be last
+    if has_default_response {
+        for (status_code, rsp) in responses {
+            match status_code {
+                autorust_openapi::StatusCode::Code(_) => {}
+                autorust_openapi::StatusCode::Default => {
+                    let tp = create_response_type(rsp)?;
+                    let response_type_name = ident(&get_response_type_name(status_code));
+                    match tp {
+                        Some(tp) => {
+                            match_status.extend(quote! {
+                                status_code => {
+                                    let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                                    let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                    #fname::DefaultResponse{status_code, value: rsp_value}.fail()
+                                }
+                            });
+                        }
+                        None => {
+                            match_status.extend(quote! {
+                                status_code => {
+                                    #fname::DefaultResponse{status_code}.fail()
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        match_status.extend(quote! {
+            status_code => {
+                let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
+                #fname::UnexpectedResponse{status_code, body: body}.fail()
+            }
+        });
+    }
+
     let func = quote! {
         pub async fn #fname(#fparams) -> #fresponse {
             let client = &configuration.client;
             let uri_str = &format!(#fpath, &configuration.base_path, #uri_str_args);
             let mut req_builder = #client_verb;
             #ts_request_builder
-            let req = req_builder.build()?;
-            let res = client.execute(req).await?;
-            Ok(res.json().await?)
+            let req = req_builder.build().context(#fname::BuildRequestError)?;
+            let rsp = client.execute(req).await.context(#fname::ExecuteRequestError)?;
+            match rsp.status() {
+                #match_status
+            }
+        }
+        pub mod #fname {
+            use crate::{models, models::*};
+            use reqwest::StatusCode;
+            use snafu::Snafu;
+
+            #response_enum
+
+            #[derive(Debug, Snafu)]
+            #[snafu(visibility(pub(crate)))]
+            pub enum Error {
+                #error_responses_ts
+                BuildRequestError { source: reqwest::Error },
+                ExecuteRequestError { source: reqwest::Error },
+                ResponseBytesError { source: reqwest::Error },
+                DeserializeError { source: serde_json::Error, body: bytes::Bytes },
+            }
         }
     };
     Ok(TokenStream::from(func))

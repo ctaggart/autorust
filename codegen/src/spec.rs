@@ -1,12 +1,26 @@
-use crate::{path, Reference, Result};
+use crate::{path, Reference};
 use autorust_openapi::{AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, Schema};
 use heck::SnakeCase;
 use indexmap::{IndexMap, IndexSet};
+use snafu::{OptionExt, ResultExt, Snafu};
 use std::{
     ffi::OsStr,
     fs,
     path::{Path, PathBuf},
 };
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+#[derive(Debug, Snafu)]
+pub enum Error {
+    PathJoin { source: path::Error },
+    SchemaNotFound,
+    NoNameInReference,
+    ParameterNotFound,
+    NotImplemented,
+    ReadFile { source: std::io::Error },
+    DeserializeYaml { source: serde_yaml::Error },
+    DeserializeJson { source: serde_json::Error },
+}
 
 /// An API specification
 #[derive(Clone, Debug)]
@@ -42,7 +56,7 @@ impl Spec {
             docs.insert(input_file.as_ref().to_owned(), doc);
 
             for file in files {
-                let doc_path = path::join(&input_file, &file)?;
+                let doc_path = path::join(&input_file, &file).context(PathJoin)?;
                 if !docs.contains_key(&doc_path) {
                     let doc = read_api_file(&doc_path)?;
                     docs.insert(doc_path, doc);
@@ -88,14 +102,16 @@ impl Spec {
         })
     }
 
-    pub fn resolve_schema_ref(&self, doc_file: &Path, reference: &str) -> Result<ResolvedSchema> {
-        let rf = Reference::parse(reference)?;
+    pub fn resolve_schema_ref<P: Into<PathBuf>>(&self, doc_file: P, reference: &str) -> Result<ResolvedSchema> {
+        let doc_file: PathBuf = doc_file.into();
+        let rf = Reference::parse(reference);
         let file = match rf.file {
             None => doc_file.to_owned(),
-            Some(file) => path::join(doc_file, &file)?,
+            Some(file) => path::join(doc_file, &file).context(PathJoin)?,
         };
         match rf.name {
-            None => Err(format!("no name in reference {}", &reference))?,
+            // None => Err(format!("no name in reference {}", &reference))?,
+            None => NoNameInReference.fail(),
             Some(nm) => {
                 let ref_key = RefKey {
                     file: file.clone(),
@@ -104,7 +120,8 @@ impl Spec {
                 let schema = self
                     .schemas
                     .get(&ref_key)
-                    .ok_or_else(|| format!("schema not found {} {}", &file.display(), &nm))?
+                    // .ok_or_else(|| format!("schema not found {} {}", &file.display(), &nm))?
+                    .context(SchemaNotFound)?
                     .clone();
                 Ok(ResolvedSchema {
                     ref_key: Some(ref_key),
@@ -115,20 +132,22 @@ impl Spec {
     }
 
     pub fn resolve_parameter_ref(&self, doc_file: &Path, reference: &str) -> Result<Parameter> {
-        let rf = Reference::parse(reference)?;
+        let rf = Reference::parse(reference);
         let file = match rf.file {
             None => doc_file.to_owned(),
-            Some(file) => path::join(doc_file, &file)?,
+            Some(file) => path::join(doc_file, &file).context(PathJoin)?,
         };
         match rf.name {
-            None => Err(format!("no name in reference {}", &reference))?,
+            // None => Err(format!("no name in reference {}", &reference))?,
+            None => NoNameInReference.fail(),
             Some(nm) => Ok(self
                 .parameters
                 .get(&RefKey {
                     file: file.clone(),
                     name: nm.clone(),
                 })
-                .ok_or_else(|| format!("parameter not found {} {}", &file.display(), &nm))?
+                // .ok_or_else(|| format!("parameter not found {} {}", &file.display(), &nm))?
+                .context(ParameterNotFound)?
                 .clone()),
         }
     }
@@ -169,7 +188,8 @@ impl Spec {
             ReferenceOr::Reference { .. } =>
             // self.resolve_path_ref(doc_file, reference),
             {
-                Err("path references not implemented")?
+                // Err("path references not implemented")?
+                NotImplemented.fail()
             } // TODO
         }
     }
@@ -200,11 +220,11 @@ impl Spec {
 
 pub fn read_api_file<P: AsRef<Path>>(path: P) -> Result<OpenAPI> {
     let path = path.as_ref();
-    let bytes = fs::read(path)?;
+    let bytes = fs::read(path).context(ReadFile)?;
     let api = if path.extension() == Some(OsStr::new("yaml")) || path.extension() == Some(OsStr::new("yml")) {
-        serde_yaml::from_slice(&bytes)?
+        serde_yaml::from_slice(&bytes).context(DeserializeYaml)?
     } else {
-        serde_json::from_slice(&bytes)?
+        serde_json::from_slice(&bytes).context(DeserializeJson)?
     };
 
     Ok(api)
@@ -407,7 +427,7 @@ pub fn get_ref_files(api: &OpenAPI) -> Result<IndexSet<String>> {
 
     let mut set = IndexSet::new();
     for s in &ref_strings {
-        if let Some(file) = Reference::parse(s)?.file {
+        if let Some(file) = Reference::parse(s).file {
             set.insert(file);
         }
     }
