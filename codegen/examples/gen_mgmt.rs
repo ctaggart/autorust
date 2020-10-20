@@ -31,19 +31,19 @@ const ONLY_SERVICES: &[&str] = &[
     ];
 
 const SKIP_SERVICES: &[&str] = &[
-    "apimanagement",            // missing properties, all preview apis
-    "appconfiguration",         // codegen response wrong, Result<Error> does not serialize
-    "appplatform",              // map_type
-    "automation",               // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
-    "azure_kusto",              // duplicate features in Cargo.toml
-    "batch",                    // missing API_VERSION
-    "cognitiveservices",        // codegen response wrong, Result<Error> does not serialize
-    "containerservice",         // missing generated Expander type
-    "cosmos-db",                // get_gremlin_graph_throughput defined twice
-    "cost-management",          // use of undeclared crate or module `definition`
-    "customproviders",          // properties::ProvisioningState in model not found
-    "databox",                  // recursive type has infinite size
-    "databoxedge",              // duplicate model pub struct SkuCost {
+    "apimanagement",     // missing properties, all preview apis
+    "appconfiguration",  // codegen response wrong, Result<Error> does not serialize
+    "appplatform",       // map_type
+    "automation",        // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
+    "azure_kusto",       // duplicate features in Cargo.toml
+    "batch",             // missing API_VERSION
+    "cognitiveservices", // codegen response wrong, Result<Error> does not serialize
+    "containerservice",  // missing generated Expander type
+    "cosmos-db",         // get_gremlin_graph_throughput defined twice
+    "cost-management",   // use of undeclared crate or module `definition`
+    "customproviders",   // properties::ProvisioningState in model not found
+    "databox",           // recursive type has infinite size
+    "databoxedge",       // duplicate model pub struct SkuCost {
     "datafactory",
     "datamigration", // Error: "schema not found ../azure-rest-api-specs/specification/datamigration/resource-manager/Microsoft.DataMigration/preview/2018-07-15-preview/definitions/MigrateSqlServerSqlDbTask.json ValidationStatus"
     "deploymentmanager", // missing params
