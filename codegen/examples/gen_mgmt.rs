@@ -19,32 +19,28 @@ pub type Result<T> = std::result::Result<T, Error>;
 const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
-const SERVICE_NAMES: &[(&str, &str)] = &[("cosmos-db", "cosmos"), ("vmware", "avs")];
+const SERVICE_NAMES: &[(&str, &str)] = &[
+    // ("cosmos-db", "cosmos"),
+    // ("vmware", "avs")
+    ];
 
 const ONLY_SERVICES: &[&str] = &[
-    // "vmware",
-    // "resources",
-    // "scheduler",
-    // "cloudshell",
-    // "reservations",
-    // "addons",
+    // "datafactory",
     ];
 
 const SKIP_SERVICES: &[&str] = &[
-    "apimanagement",     // missing properties, all preview apis
-    "appconfiguration",  // codegen response wrong, Result<Error> does not serialize
-    "appplatform",       // map_type
-    "automation",        // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
-    "azure_kusto",       // duplicate features in Cargo.toml
-    "batch",             // missing API_VERSION
-    "cognitiveservices", // codegen response wrong, Result<Error> does not serialize
-    "containerservice",  // missing generated Expander type
-    "cosmos-db",         // get_gremlin_graph_throughput defined twice
-    "cost-management",   // use of undeclared crate or module `definition`
-    "customproviders",   // properties::ProvisioningState in model not found
-    "databox",           // recursive type has infinite size
-    "databoxedge",       // duplicate model pub struct SkuCost {
-    "datafactory",
+    "apimanagement",                // missing properties, all preview apis
+    "appconfiguration",             // codegen response wrong, Result<Error> does not serialize
+    "appplatform",                  // map_type
+    "automation",                   // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
+    "cognitiveservices",            // codegen response wrong, Result<Error> does not serialize
+    "containerservice",             // missing generated Expander type
+    "cosmos-db",                    // get_gremlin_graph_throughput defined twice
+    "cost-management",              // use of undeclared crate or module `definition`
+    "customproviders",              // properties::ProvisioningState in model not found
+    "databox",                      // recursive type has infinite size
+    "databoxedge",                  // duplicate model pub struct SkuCost {
+    "datafactory",                  // TODO #64 nested types
     "datamigration", // Error: "schema not found ../azure-rest-api-specs/specification/datamigration/resource-manager/Microsoft.DataMigration/preview/2018-07-15-preview/definitions/MigrateSqlServerSqlDbTask.json ValidationStatus"
     "deploymentmanager", // missing params
     "deviceprovisioningservices", // missing files
@@ -53,22 +49,18 @@ const SKIP_SERVICES: &[&str] = &[
     "healthcareapis", // Error: "schema not found ../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json Resource"
     "hybridcompute",  // use of undeclared crate or module `status`
     "intune",         // codegen response wrong, Result<Error> does not serialize
-    "keyvault",       // defines Error, recursive type has infinite size
     "logic",          // recursive type has infinite size
     "kubernetesconfiguration", // properties not defined
-    "maintenance",    // missing API_VERSION
     "machinelearning", // missing params
-    "mariadb",        // Result<Configuration>
+    "mariadb",        // TODO #66 multi-value query param
     "managedservices", // registration_definition
     "mediaservices",  // Error: Error("invalid unicode code point", line: 1380, column: 289)
     "migrateprojects", // recursive type has infinite size
     "mixedreality",   // &AccountKeyRegenerateRequest not found in scope
     "monitor",        // missing properties
-    "mysql",          // Ok200(Configuration)
     "netapp",         // codegen wrong, missing operation params in function
     "network",        // thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', codegen/src/codegen.rs:419:42
-    "portal",         // Ok200(Configuration)
-    "postgresql",     // Configuration
+    "portal",         // TODO #64 nested types
     "powerplatform", // Error: "parameter not found ../azure-rest-api-specs/specification/powerplatform/resource-manager/Microsoft.PowerPlatform/common/v1/definitions.json ResourceGroupNameParameter"
     "recoveryservicessiterecovery", // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
     "redis",         // map_type
@@ -78,7 +70,6 @@ const SKIP_SERVICES: &[&str] = &[
     "service-map", // thread 'main' panicked at '"Ref:machine" is not a valid Ident', /Users/cameron/.cargo/registry/src/github.com-1ecc6299db9ec823/proc-macro2-1.0.24/src/fallback.rs:693:9
     "servicebus",  // properties::Action
     "servicefabric", // {}/providers/Microsoft.ServiceFabric/operations list defined twice
-    "softwareplan", // Result<Error>
     "storagecache", // use of undeclared crate or module `properties`
     "synapse",     // missing properties
     "web",         // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 1950, column: 5)
