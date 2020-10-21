@@ -73,7 +73,6 @@ impl CodeGen {
         file.extend(quote! {
             #![allow(non_camel_case_types)]
             #![allow(unused_imports)]
-            use crate::*;
             use serde::{Deserialize, Serialize};
         });
         let mut all_schemas: IndexMap<RefKey, ResolvedSchema> = IndexMap::new();
@@ -136,7 +135,7 @@ impl CodeGen {
             #![allow(unused_mut)]
             #![allow(unused_variables)]
             #![allow(unused_imports)]
-            use crate::{models::*};
+            use crate::models::*;
             use reqwest::StatusCode;
             use snafu::{ResultExt, Snafu};
         });
@@ -170,7 +169,7 @@ impl CodeGen {
                     let name = ident(&module_name);
                     file.extend(quote! {
                         pub mod #name {
-                            use crate::{models::*};
+                            use crate::models::*;
                             use reqwest::StatusCode;
                             use snafu::{ResultExt, Snafu};
                             #module
