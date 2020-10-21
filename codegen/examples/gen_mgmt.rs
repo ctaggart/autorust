@@ -7,7 +7,6 @@ use autorust_codegen::{
     lib_rs, path, run, Config,
 };
 use heck::SnakeCase;
-use indexmap::IndexSet;
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -30,10 +29,8 @@ const ONLY_SERVICES: &[&str] = &[
 
 const SKIP_SERVICES: &[&str] = &[
     "apimanagement",                // missing properties, all preview apis
-    "appconfiguration",             // codegen response wrong, Result<Error> does not serialize
     "appplatform",                  // map_type
     "automation",                   // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
-    "cognitiveservices",            // codegen response wrong, Result<Error> does not serialize
     "containerservice",             // missing generated Expander type
     "cosmos-db",                    // get_gremlin_graph_throughput defined twice
     "cost-management",              // use of undeclared crate or module `definition`
@@ -48,7 +45,6 @@ const SKIP_SERVICES: &[&str] = &[
     "hardwaresecuritymodules", // recursive without indirection on Error
     "healthcareapis", // Error: "schema not found ../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json Resource"
     "hybridcompute",  // use of undeclared crate or module `status`
-    "intune",         // codegen response wrong, Result<Error> does not serialize
     "logic",          // recursive type has infinite size
     "kubernetesconfiguration", // properties not defined
     "machinelearning", // missing params
@@ -83,28 +79,27 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
 ];
 
 fn main() -> Result<()> {
-    let paths = fs::read_dir(SPEC_FOLDER).unwrap();
+    let paths = fs::read_dir(SPEC_FOLDER)?;
     let mut spec_folders = Vec::new();
     for path in paths {
         let path = path?;
         if path.file_type()?.is_dir() {
             let file_name = path.file_name();
-            let spec_folder = file_name.to_str().ok_or("file name")?;
+            let spec_folder = file_name.to_str().ok_or("file name was not utf-8")?;
             spec_folders.push(spec_folder.to_owned());
         }
     }
     spec_folders.sort();
-    let only_services: IndexSet<&str> = ONLY_SERVICES.iter().cloned().collect();
-    if only_services.len() > 0 {
-        for (i, spec_folder) in only_services.iter().enumerate() {
+
+    if ONLY_SERVICES.len() > 0 {
+        for (i, spec_folder) in ONLY_SERVICES.iter().enumerate() {
             println!("{} {}", i + 1, spec_folder);
             gen_crate(spec_folder)?;
         }
     } else {
-        let skip_services: HashSet<&str> = SKIP_SERVICES.iter().cloned().collect();
         for (i, spec_folder) in spec_folders.iter().enumerate() {
             println!("{} {}", i + 1, spec_folder);
-            if !skip_services.contains(spec_folder.as_str()) {
+            if !SKIP_SERVICES.contains(&spec_folder.as_str()) {
                 gen_crate(spec_folder)?;
             }
         }
@@ -112,20 +107,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn get_service_name(spec_folder: &str) -> String {
-    let service_names: HashMap<_, _> = SERVICE_NAMES.iter().cloned().collect();
-    if let Some(service_name) = service_names.get(spec_folder) {
-        service_name.to_string()
-    } else {
-        spec_folder.to_snake_case().replace("-", "_")
-    }
-}
-
 fn gen_crate(spec_folder: &str) -> Result<()> {
     let spec_folder_full = path::join(SPEC_FOLDER, spec_folder)?;
     let readme = &path::join(spec_folder_full, "resource-manager/readme.md")?;
     if !readme.exists() {
-        println!("not found {:?}", readme);
+        println!("readme not found at {:?}", readme);
         return Ok(());
     }
 
@@ -133,14 +119,16 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
     // println!("{} -> {}", spec_folder, service_name);
     let crate_name = &format!("azure_mgmt_{}", service_name);
     let output_folder = &path::join(OUTPUT_FOLDER, service_name)?;
+
     let src_folder = path::join(output_folder, "src")?;
     if src_folder.exists() {
         fs::remove_dir_all(&src_folder)?;
     }
+
     // fs::create_dir_all(&src_folder)?;
     let packages = config_parser::parse_configurations_from_autorest_config_file(&readme);
-    let mut feature_mod_names: Vec<(String, String)> = Vec::new();
-    let skip_service_tags: HashSet<(&str, &str)> = SKIP_SERVICE_TAGS.iter().cloned().collect();
+    let mut feature_mod_names = Vec::new();
+    let skip_service_tags: HashSet<&(&str, &str)> = SKIP_SERVICE_TAGS.iter().collect();
     for package in packages {
         let tag = package.tag.as_str();
         if let Some(api_version) = to_api_version(&package) {
@@ -184,4 +172,13 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
     lib_rs::create(&feature_mod_names, &path::join(src_folder, "lib.rs").map_err(|_| "lib.rs")?)?;
 
     Ok(())
+}
+
+fn get_service_name(spec_folder: &str) -> String {
+    let service_names: HashMap<_, _> = SERVICE_NAMES.iter().cloned().collect();
+    if let Some(service_name) = service_names.get(spec_folder) {
+        service_name.to_string()
+    } else {
+        spec_folder.to_snake_case().replace("-", "_")
+    }
 }
