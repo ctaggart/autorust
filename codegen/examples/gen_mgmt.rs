@@ -28,7 +28,7 @@ const ONLY_SERVICES: &[&str] = &[
     ];
 
 const SKIP_SERVICES: &[&str] = &[
-    "appplatform",                  // map_type
+    "apimanagement",                // missing properties, all preview apis
     "automation",                   // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
     "cosmos-db",                    // get_gremlin_graph_throughput defined twice
     "cost-management",              // use of undeclared crate or module `definition`
@@ -43,7 +43,6 @@ const SKIP_SERVICES: &[&str] = &[
     "hybridcompute",  // use of undeclared crate or module `status`
     "logic",          // recursive type has infinite size
     "machinelearning", // missing params
-    "mariadb",        // TODO #66 multi-value query param
     "managedservices", // registration_definition
     "mediaservices",  // Error: Error("invalid unicode code point", line: 1380, column: 289)
     "migrateprojects", // recursive type has infinite size
