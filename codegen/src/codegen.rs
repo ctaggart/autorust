@@ -221,10 +221,7 @@ impl CodeGen {
             if !is_vec {
                 field_tp_name = require(is_required, field_tp_name);
             }
-
-            if let Some(field_tp) = field_tp {
-                local_types.push(field_tp);
-            }
+            local_types.extend(field_tp);
             let mut serde_attrs: Vec<TokenStream> = Vec::new();
             if &nm.to_string() != property_name {
                 serde_attrs.push(quote! { rename = #property_name });
@@ -263,7 +260,7 @@ impl CodeGen {
             let mut types = TokenStream::new();
             local_types.into_iter().for_each(|tp| types.extend(tp));
             streams.push(quote! {
-                mod #ns {
+                pub mod #ns {
                     use super::*;
                     #types
                 }
@@ -281,23 +278,24 @@ impl CodeGen {
         namespace: &TokenStream,
         property_name: &str,
         property: &ResolvedSchema,
-    ) -> Result<(TokenStream, Option<TokenStream>)> {
+    ) -> Result<(TokenStream, Vec<TokenStream>)> {
         match &property.ref_key {
             Some(ref_key) => {
                 let tp = ident(&ref_key.name.to_camel_case());
-                Ok((tp, None))
+                Ok((tp, Vec::new()))
             }
             None => {
                 if is_local_enum(property) {
                     let (tp_name, tp) = create_enum(namespace, property_name, property);
-                    Ok((tp_name, Some(tp)))
+                    Ok((tp_name, vec![tp]))
                 } else if is_local_struct(property) {
                     let id = ident(&property_name.to_camel_case());
                     let tp_name = quote! {#namespace::#id};
                     let tps = self.create_struct(doc_file, property_name, property)?;
-                    Ok((tp_name, Some(tps[0].clone())))
+                    // println!("creating local struct {:?} {}", tp_name, tps.len());
+                    Ok((tp_name, tps))
                 } else {
-                    Ok((get_type_name_for_schema(&property.schema)?, None))
+                    Ok((get_type_name_for_schema(&property.schema)?, Vec::new()))
                 }
             }
         }
