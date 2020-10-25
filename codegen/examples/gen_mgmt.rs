@@ -29,7 +29,6 @@ const ONLY_SERVICES: &[&str] = &[
 
 const SKIP_SERVICES: &[&str] = &[
     "apimanagement",                // missing properties, all preview apis
-    "appplatform",                  // map_type
     "automation",                   // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
     "containerservice",             // missing generated Expander type
     "cosmos-db",                    // get_gremlin_graph_throughput defined twice
@@ -48,7 +47,6 @@ const SKIP_SERVICES: &[&str] = &[
     "logic",          // recursive type has infinite size
     "kubernetesconfiguration", // properties not defined
     "machinelearning", // missing params
-    "mariadb",        // TODO #66 multi-value query param
     "managedservices", // registration_definition
     "mediaservices",  // Error: Error("invalid unicode code point", line: 1380, column: 289)
     "migrateprojects", // recursive type has infinite size
