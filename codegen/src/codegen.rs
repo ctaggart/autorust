@@ -27,6 +27,7 @@ pub enum Error {
 }
 
 /// Whether or not to pass a type is a reference.
+#[derive(Copy, Clone)]
 pub enum AsReference {
     True,
     False,
@@ -193,7 +194,7 @@ impl CodeGen {
     fn create_vec_alias(&self, doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
         let items = get_schema_array_items(&schema.schema.common)?;
         let typ = ident(&alias_name.to_camel_case());
-        let items_typ = get_type_name_for_schema_ref(&items, &AsReference::False)?;
+        let items_typ = get_type_name_for_schema_ref(&items, AsReference::False)?;
         Ok(quote! { pub type #typ = Vec<#items_typ>; })
     }
 
@@ -207,7 +208,7 @@ impl CodeGen {
         let required: HashSet<&str> = schema.schema.required.iter().map(String::as_str).collect();
 
         for schema in &schema.schema.all_of {
-            let type_name = get_type_name_for_schema_ref(schema, &AsReference::False)?;
+            let type_name = get_type_name_for_schema_ref(schema, AsReference::False)?;
             let field_name = ident(&type_name.to_string().to_snake_case());
             props.extend(quote! {
                 #[serde(flatten)]
@@ -303,7 +304,7 @@ impl CodeGen {
                     let tps = self.create_struct(doc_file, property_name, property)?;
                     Ok((tp_name, Some(tps[0].clone())))
                 } else {
-                    Ok((get_type_name_for_schema(&property.schema.common, &AsReference::False)?, None))
+                    Ok((get_type_name_for_schema(&property.schema.common, AsReference::False)?, None))
                 }
             }
         }
@@ -469,9 +470,9 @@ fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     let is_array = is_array(&param.common);
     let format = param.common.format.as_deref();
     let tp = if let Some(param_type) = &param.common.type_ {
-        get_type_name_for_schema(&param.common, &AsReference::True)?
+        get_type_name_for_schema(&param.common, AsReference::True)?
     } else if let Some(schema) = &param.schema {
-        get_type_name_for_schema_ref(schema, &AsReference::True)?
+        get_type_name_for_schema_ref(schema, AsReference::True)?
     } else {
         eprintln!("WARN unkown param type for {}", &param.name);
         quote! { &serde_json::Value }
@@ -504,7 +505,7 @@ fn create_function_params(cg: &CodeGen, doc_file: &Path, parameters: &Vec<Parame
     Ok(quote! { #(#params),* })
 }
 
-fn get_type_name_for_schema(schema: &SchemaCommon, as_ref: &AsReference) -> Result<TokenStream> {
+fn get_type_name_for_schema(schema: &SchemaCommon, as_ref: AsReference) -> Result<TokenStream> {
     if let Some(schema_type) = &schema.type_ {
         let format = schema.format.as_deref();
         let ts = match schema_type {
@@ -553,7 +554,7 @@ fn get_type_name_for_schema(schema: &SchemaCommon, as_ref: &AsReference) -> Resu
     }
 }
 
-fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>, as_ref: &AsReference) -> Result<TokenStream> {
+fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>, as_ref: AsReference) -> Result<TokenStream> {
     match schema {
         ReferenceOr::Reference { reference, .. } => {
             let rf = Reference::parse(&reference);
@@ -570,7 +571,7 @@ fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>, as_ref: &AsReferen
 
 fn create_response_type(rsp: &Response) -> Result<Option<TokenStream>> {
     if let Some(schema) = &rsp.schema {
-        Ok(Some(get_type_name_for_schema_ref(schema, &AsReference::False)?))
+        Ok(Some(get_type_name_for_schema_ref(schema, AsReference::False)?))
     } else {
         Ok(None)
     }
