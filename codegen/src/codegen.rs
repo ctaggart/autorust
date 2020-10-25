@@ -4,7 +4,7 @@ use crate::{
     status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses, has_default_response},
     Config, OperationVerb, Reference, ResolvedSchema, Spec,
 };
-use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Response, Schema, SchemaCommon};
+use autorust_openapi::{CollectionFormat, DataType, Parameter, ParameterType, PathItem, ReferenceOr, Response, Schema, SchemaCommon};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
@@ -118,7 +118,7 @@ impl CodeGen {
                 //     schema_name, first_doc_file, doc_file
                 // );
             } else {
-                if is_schema_an_array(schema) {
+                if is_array(&schema.schema.common) {
                     file.extend(self.create_vec_alias(doc_file, schema_name, schema)?);
                 } else if is_local_enum(schema) {
                     let no_namespace = TokenStream::new();
@@ -314,8 +314,8 @@ fn is_vec(ts: &TokenStream) -> bool {
     ts.to_string().starts_with("Vec <")
 }
 
-fn is_schema_an_array(schema: &spec::ResolvedSchema) -> bool {
-    matches!(&schema.schema.common.type_, Some(DataType::Array))
+fn is_array(schema: &SchemaCommon) -> bool {
+    matches!(schema.type_, Some(DataType::Array))
 }
 
 fn get_schema_array_items(schema: &SchemaCommon) -> Result<&ReferenceOr<Schema>> {
@@ -466,6 +466,7 @@ fn trim_ref(path: &str) -> String {
 
 fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     let is_required = param.required.unwrap_or(false);
+    let is_array = is_array(&param.common);
     let format = param.common.format.as_deref();
     let tp = if let Some(param_type) = &param.common.type_ {
         get_type_name_for_schema(&param.common, &AsReference::True)?
@@ -475,7 +476,7 @@ fn get_param_type(param: &Parameter) -> Result<TokenStream> {
         eprintln!("WARN unkown param type for {}", &param.name);
         quote! { &serde_json::Value }
     };
-    Ok(require(is_required, tp))
+    Ok(require(is_required || is_array, tp))
 }
 
 fn get_param_name(param: &Parameter) -> TokenStream {
@@ -646,16 +647,35 @@ fn create_function(
         match param.in_ {
             ParameterType::Path => {} // handled above
             ParameterType::Query => {
-                if required {
-                    ts_request_builder.extend(quote! {
-                        req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
-                    });
-                } else {
-                    ts_request_builder.extend(quote! {
-                        if let Some(#param_name_var) = #param_name_var {
-                            req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
+                let is_array = is_array(&param.common);
+                let query_body = if is_array {
+                    let collection_format = param.collection_format.as_ref().unwrap_or(&CollectionFormat::Csv);
+                    match collection_format {
+                            CollectionFormat::Multi => Some(quote! {
+                                for value in #param_name_var {
+                                    req_builder = req_builder.query(&[(#param_name, value)]);
+                                }
+                            }),
+                            CollectionFormat::Csv | // TODO #71
+                            CollectionFormat::Ssv |
+                            CollectionFormat::Tsv |
+                            CollectionFormat::Pipes => None,
                         }
-                    });
+                } else {
+                    Some(quote! {
+                        req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
+                    })
+                };
+                if let Some(query_body) = query_body {
+                    if required || is_array {
+                        ts_request_builder.extend(query_body);
+                    } else {
+                        ts_request_builder.extend(quote! {
+                            if let Some(#param_name_var) = #param_name_var {
+                                #query_body
+                            }
+                        });
+                    }
                 }
             }
             ParameterType::Header => {
