@@ -67,7 +67,7 @@ dependencies = [
 [[package]]
 name = "autorust_openapi"
 version = "0.2.0"
-source = "git+https://github.com/ctaggart/autorust_openapi#c8f19ff05c9f98d4f1ac040e64ee60a1298201eb"
+source = "git+https://github.com/ctaggart/autorust_openapi#181baf2b89d32c013258e40b59d3e00bb501c9c4"
 dependencies = [
  "indexmap",
  "serde",
@@ -560,9 +560,9 @@ checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
 
 [[package]]
 name = "syn"
-version = "1.0.45"
+version = "1.0.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea9c5432ff16d6152371f808fb5a871cd67368171b09bb21b43df8e4a47a3556"
+checksum = "cc371affeffc477f42a221a1e4297aedcea33d47d19b61455588bd9d8f6b19ac"
 dependencies = [
  "proc-macro2",
  "quote",
