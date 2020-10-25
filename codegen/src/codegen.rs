@@ -4,7 +4,7 @@ use crate::{
     status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses, has_default_response},
     Config, OperationVerb, Reference, ResolvedSchema, Spec,
 };
-use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Response, Schema};
+use autorust_openapi::{DataType, Parameter, ParameterType, PathItem, ReferenceOr, Response, Schema, SchemaCommon};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
@@ -24,6 +24,12 @@ pub enum Error {
     SpecError { source: spec::Error },
     ArrayExpectedToHaveItems,
     NoNameForRef,
+}
+
+/// Whether or not to pass a type is a reference.
+pub enum AsReference {
+    True,
+    False,
 }
 
 /// code generation context
@@ -185,9 +191,9 @@ impl CodeGen {
     }
 
     fn create_vec_alias(&self, doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
-        let items = get_schema_array_items(&schema.schema)?;
+        let items = get_schema_array_items(&schema.schema.common)?;
         let typ = ident(&alias_name.to_camel_case());
-        let items_typ = get_type_name_for_schema_ref(&items)?;
+        let items_typ = get_type_name_for_schema_ref(&items, &AsReference::False)?;
         Ok(quote! { pub type #typ = Vec<#items_typ>; })
     }
 
@@ -201,7 +207,7 @@ impl CodeGen {
         let required: HashSet<&str> = schema.schema.required.iter().map(String::as_str).collect();
 
         for schema in &schema.schema.all_of {
-            let type_name = get_type_name_for_schema_ref(schema)?;
+            let type_name = get_type_name_for_schema_ref(schema, &AsReference::False)?;
             let field_name = ident(&type_name.to_string().to_snake_case());
             props.extend(quote! {
                 #[serde(flatten)]
@@ -297,7 +303,7 @@ impl CodeGen {
                     let tps = self.create_struct(doc_file, property_name, property)?;
                     Ok((tp_name, Some(tps[0].clone())))
                 } else {
-                    Ok((get_type_name_for_schema(&property.schema)?, None))
+                    Ok((get_type_name_for_schema(&property.schema.common, &AsReference::False)?, None))
                 }
             }
         }
@@ -312,14 +318,8 @@ fn is_schema_an_array(schema: &spec::ResolvedSchema) -> bool {
     matches!(&schema.schema.common.type_, Some(DataType::Array))
 }
 
-fn get_schema_array_items(schema: &Schema) -> Result<&ReferenceOr<Schema>> {
-    Ok(schema
-        .common
-        .items
-        .as_ref()
-        .as_ref()
-        // .ok_or_else(|| format!("array expected to have items"))?)
-        .context(ArrayExpectedToHaveItems)?)
+fn get_schema_array_items(schema: &SchemaCommon) -> Result<&ReferenceOr<Schema>> {
+    Ok(schema.items.as_ref().as_ref().context(ArrayExpectedToHaveItems)?)
 }
 
 pub fn create_generated_by_header() -> TokenStream {
@@ -464,26 +464,13 @@ fn trim_ref(path: &str) -> String {
     path[pos..].to_string()
 }
 
-// simple types in the url
-fn map_type(param_type: &DataType) -> TokenStream {
-    match param_type {
-        DataType::String => quote! { &str },
-        DataType::Integer => quote! { i64 },
-        DataType::Boolean => quote! { bool },
-        _ => {
-            eprintln!("WARN: map param type {:#?}", param_type);
-            quote! { map_type } // TODO may be Err instead
-        }
-    }
-}
-
 fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     let is_required = param.required.unwrap_or(false);
+    let format = param.common.format.as_deref();
     let tp = if let Some(param_type) = &param.common.type_ {
-        map_type(param_type)
+        get_type_name_for_schema(&param.common, &AsReference::True)?
     } else if let Some(schema) = &param.schema {
-        let tp = get_type_name_for_schema_ref(schema)?;
-        quote! { &#tp }
+        get_type_name_for_schema_ref(schema, &AsReference::True)?
     } else {
         eprintln!("WARN unkown param type for {}", &param.name);
         quote! { &serde_json::Value }
@@ -516,59 +503,73 @@ fn create_function_params(cg: &CodeGen, doc_file: &Path, parameters: &Vec<Parame
     Ok(quote! { #(#params),* })
 }
 
-fn get_type_name_for_schema(schema: &Schema) -> Result<TokenStream> {
-    if let Some(schema_type) = &schema.common.type_ {
-        let format = schema.common.format.as_deref();
+fn get_type_name_for_schema(schema: &SchemaCommon, as_ref: &AsReference) -> Result<TokenStream> {
+    if let Some(schema_type) = &schema.type_ {
+        let format = schema.format.as_deref();
         let ts = match schema_type {
             DataType::Array => {
-                let items = get_schema_array_items(schema)?;
-                let vec_items_typ = get_type_name_for_schema_ref(&items)?;
-                quote! {Vec<#vec_items_typ>}
+                let items = get_schema_array_items(&schema)?;
+                let vec_items_typ = get_type_name_for_schema_ref(&items, as_ref)?;
+                match as_ref {
+                    AsReference::True => quote! { &Vec<#vec_items_typ> },
+                    AsReference::False => quote! { Vec<#vec_items_typ> },
+                }
             }
             DataType::Integer => {
                 if format == Some("int32") {
-                    quote! {i32}
+                    quote! { i32 }
                 } else {
-                    quote! {i64}
+                    quote! { i64 }
                 }
             }
             DataType::Number => {
                 if format == Some("float") {
-                    quote! {f32}
+                    quote! { f32 }
                 } else {
-                    quote! {f64}
+                    quote! { f64 }
                 }
             }
-            DataType::String => quote! {String},
-            DataType::Boolean => quote! {bool},
-            DataType::Object => quote! {serde_json::Value},
+            DataType::String => match as_ref {
+                AsReference::True => quote! { &str },
+                AsReference::False => quote! { String },
+            },
+            DataType::Boolean => quote! { bool },
+            DataType::Object => match as_ref {
+                AsReference::True => quote! { &serde_json::Value },
+                AsReference::False => quote! { serde_json::Value },
+            },
         };
         Ok(ts)
     } else {
         eprintln!(
             "WARN unknown type in get_type_name_for_schema, description {:?}",
-            schema.common.description
+            schema.description
         );
-        Ok(quote! {serde_json::Value})
+        match as_ref {
+            AsReference::True => Ok(quote! { &serde_json::Value }),
+            AsReference::False => Ok(quote! { serde_json::Value }),
+        }
     }
 }
 
-fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>) -> Result<TokenStream> {
+fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>, as_ref: &AsReference) -> Result<TokenStream> {
     match schema {
         ReferenceOr::Reference { reference, .. } => {
             let rf = Reference::parse(&reference);
-            // let idt = ident(&rf.name.ok_or_else(|| format!("no name for ref {}", reference))?.to_camel_case());
             let name = &rf.name.context(NoNameForRef)?;
             let idt = ident(&name.to_camel_case());
-            Ok(quote! { #idt })
+            match as_ref {
+                AsReference::True => Ok(quote! { &#idt }),
+                AsReference::False => Ok(quote! { #idt }),
+            }
         }
-        ReferenceOr::Item(schema) => get_type_name_for_schema(schema),
+        ReferenceOr::Item(schema) => get_type_name_for_schema(&schema.common, as_ref),
     }
 }
 
 fn create_response_type(rsp: &Response) -> Result<Option<TokenStream>> {
     if let Some(schema) = &rsp.schema {
-        Ok(Some(get_type_name_for_schema_ref(schema)?))
+        Ok(Some(get_type_name_for_schema_ref(schema, &AsReference::False)?))
     } else {
         Ok(None)
     }
