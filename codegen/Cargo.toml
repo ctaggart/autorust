@@ -15,10 +15,10 @@ serde_json = "*"
 serde_yaml = "*"
 heck = "*"
 regex = "*"
-indexmap = {version = "*", features = ["serde-1"]}
+indexmap = { version = "*", features = ["serde-1"] }
 path_abs = "*"
 comrak = "0.8"
 serde = "1.0"
-snafu = "0.6"
+snafu = { version = "0.6", features = ["backtraces"] }
 http = "0.2"
 lazy_static = "1.4"

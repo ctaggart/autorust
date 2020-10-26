@@ -12,7 +12,7 @@ pub use self::{
     spec::{OperationVerb, ResolvedSchema, Spec},
 };
 use proc_macro2::TokenStream;
-use snafu::{ResultExt, Snafu};
+use snafu::{Backtrace, ResultExt, Snafu};
 use std::{
     fs::{self, File},
     io::prelude::*,
@@ -22,25 +22,28 @@ use std::{
 extern crate lazy_static;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
 #[derive(Debug, Snafu)]
+// #[snafu(visibility(pub(crate)))]
 pub enum Error {
     #[snafu(display("Could not create output directory {}: {}", directory.display(), source))]
-    CreateOutputDirectory {
+    CreateOutputDirectoryError {
         directory: PathBuf,
         source: std::io::Error,
     },
     #[snafu(display("Could not create file {}: {}", file.display(), source))]
-    CreateFile {
+    CreateFileError {
         file: PathBuf,
         source: std::io::Error,
     },
     #[snafu(display("Could not write file {}: {}", file.display(), source))]
-    WriteFile {
+    WriteFileError {
         file: PathBuf,
         source: std::io::Error,
     },
     CodeGenError {
         source: codegen::Error,
+        backtrace: Backtrace,
     },
     PathError {
         source: path::Error,
@@ -56,7 +59,7 @@ pub struct Config {
 
 pub fn run(config: Config) -> Result<()> {
     let directory = &config.output_folder;
-    fs::create_dir_all(directory).context(CreateOutputDirectory { directory })?;
+    fs::create_dir_all(directory).context(CreateOutputDirectoryError { directory })?;
     let cg = &CodeGen::new(config.clone()).context(CodeGenError)?;
 
     // create models from schemas
@@ -81,7 +84,7 @@ pub fn write_file<P: Into<PathBuf>>(file: P, tokens: &TokenStream) -> Result<()>
     let file: PathBuf = file.into();
     println!("writing file {}", &file.display());
     let code = tokens.to_string();
-    let mut buffer = File::create(&file).context(CreateFile { file: file.clone() })?;
-    buffer.write_all(&code.as_bytes()).context(WriteFile { file })?;
+    let mut buffer = File::create(&file).context(CreateFileError { file: file.clone() })?;
+    buffer.write_all(&code.as_bytes()).context(WriteFileError { file })?;
     Ok(())
 }

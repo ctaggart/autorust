@@ -1,19 +1,16 @@
 // cargo run --example gen_mgmt
 // https://github.com/Azure/azure-rest-api-specs/blob/master/specification/compute/resource-manager
-
 use autorust_codegen::{
-    cargo_toml,
+    self, cargo_toml,
     config_parser::{self, to_api_version, to_mod_name},
-    lib_rs, path, run, Config,
+    lib_rs, path, Config,
 };
 use heck::SnakeCase;
+use snafu::{ErrorCompat, OptionExt, ResultExt, Snafu};
 use std::{
     collections::{HashMap, HashSet},
     fs,
 };
-
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
-pub type Result<T> = std::result::Result<T, Error>;
 
 const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
@@ -25,7 +22,8 @@ const SERVICE_NAMES: &[(&str, &str)] = &[
 
 const ONLY_SERVICES: &[&str] = &[
     // "datafactory",
-    ];
+    // "network",
+];
 
 const SKIP_SERVICES: &[&str] = &[
     "apimanagement",                // missing properties, all preview apis
@@ -65,14 +63,69 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("recoveryservicesbackup", "package-2020-07"), // duplicate fn get_operation_status
 ];
 
-fn main() -> Result<()> {
-    let paths = fs::read_dir(SPEC_FOLDER)?;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+#[derive(Debug, Snafu)]
+// #[snafu(visibility(pub(crate)))]
+pub enum Error {
+    #[snafu(display("file name was not utf-8"))]
+    FileNameNotUtf8Error {},
+    IoError {
+        source: std::io::Error,
+    },
+    PathError {
+        source: path::Error,
+    },
+    CodegenError {
+        #[snafu(backtrace)]
+        source: autorust_codegen::Error,
+    },
+    CargoTomlError {
+        source: cargo_toml::Error,
+    },
+    LibRsError {
+        source: lib_rs::Error,
+    },
+}
+
+fn main() {
+    match run() {
+        Ok(_) => {}
+        Err(err) => {
+            report(&err);
+        }
+    }
+}
+
+fn report<E: 'static>(err: &E)
+where
+    E: std::error::Error,
+    E: snafu::ErrorCompat,
+    E: Send + Sync,
+{
+    eprintln!("[ERROR] {}", err);
+    if let Some(source) = err.source() {
+        eprintln!();
+        eprintln!("Caused by:");
+        for (i, e) in std::iter::successors(Some(source), |e| e.source()).enumerate() {
+            eprintln!("   {}: {}", i, e);
+        }
+    }
+
+    if let Some(backtrace) = ErrorCompat::backtrace(err) {
+        eprintln!("Backtrace:");
+        eprintln!("{}", backtrace);
+    }
+}
+
+fn run() -> Result<()> {
+    let paths = fs::read_dir(SPEC_FOLDER).context(IoError)?;
     let mut spec_folders = Vec::new();
     for path in paths {
-        let path = path?;
-        if path.file_type()?.is_dir() {
+        let path = path.context(IoError)?;
+        if path.file_type().context(IoError)?.is_dir() {
             let file_name = path.file_name();
-            let spec_folder = file_name.to_str().ok_or("file name was not utf-8")?;
+            let spec_folder = file_name.to_str().context(FileNameNotUtf8Error)?;
             spec_folders.push(spec_folder.to_owned());
         }
     }
@@ -95,8 +148,8 @@ fn main() -> Result<()> {
 }
 
 fn gen_crate(spec_folder: &str) -> Result<()> {
-    let spec_folder_full = path::join(SPEC_FOLDER, spec_folder)?;
-    let readme = &path::join(spec_folder_full, "resource-manager/readme.md")?;
+    let spec_folder_full = path::join(SPEC_FOLDER, spec_folder).context(PathError)?;
+    let readme = &path::join(spec_folder_full, "resource-manager/readme.md").context(PathError)?;
     if !readme.exists() {
         println!("readme not found at {:?}", readme);
         return Ok(());
@@ -105,14 +158,13 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
     let service_name = &get_service_name(spec_folder);
     // println!("{} -> {}", spec_folder, service_name);
     let crate_name = &format!("azure_mgmt_{}", service_name);
-    let output_folder = &path::join(OUTPUT_FOLDER, service_name)?;
+    let output_folder = &path::join(OUTPUT_FOLDER, service_name).context(PathError)?;
 
-    let src_folder = path::join(output_folder, "src")?;
+    let src_folder = path::join(output_folder, "src").context(PathError)?;
     if src_folder.exists() {
-        fs::remove_dir_all(&src_folder)?;
+        fs::remove_dir_all(&src_folder).context(IoError)?;
     }
 
-    // fs::create_dir_all(&src_folder)?;
     let packages = config_parser::parse_configurations_from_autorest_config_file(&readme);
     let mut feature_mod_names = Vec::new();
     let skip_service_tags: HashSet<&(&str, &str)> = SKIP_SERVICE_TAGS.iter().collect();
@@ -128,24 +180,26 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
             let mod_name = &to_mod_name(tag);
             feature_mod_names.push((tag.to_string(), mod_name.clone()));
             // println!("  {}", mod_name);
-            let mod_output_folder = path::join(&src_folder, mod_name)?;
+            let mod_output_folder = path::join(&src_folder, mod_name).context(PathError)?;
             // println!("  {:?}", mod_output_folder);
             // for input_file in &package.input_files {
             //     println!("  {}", input_file);
             // }
-            let input_files: Vec<_> = package
+            let input_files: Result<Vec<_>> = package
                 .input_files
                 .iter()
-                .map(|input_file| path::join(readme, input_file).unwrap())
+                .map(|input_file| Ok(path::join(readme, input_file).context(PathError)?))
                 .collect();
+            let input_files = input_files?;
             // for input_file in &input_files {
             //     println!("  {:?}", input_file);
             // }
-            run(Config {
+            autorust_codegen::run(Config {
                 api_version: Some(api_version),
                 output_folder: mod_output_folder.into(),
                 input_files,
-            })?;
+            })
+            .context(CodegenError)?;
         }
     }
     if feature_mod_names.len() == 0 {
@@ -154,9 +208,10 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
     cargo_toml::create(
         crate_name,
         &feature_mod_names,
-        &path::join(output_folder, "Cargo.toml").map_err(|_| "Cargo.toml")?,
-    )?;
-    lib_rs::create(&feature_mod_names, &path::join(src_folder, "lib.rs").map_err(|_| "lib.rs")?)?;
+        &path::join(output_folder, "Cargo.toml").context(PathError)?,
+    )
+    .context(CargoTomlError)?;
+    lib_rs::create(&feature_mod_names, &path::join(src_folder, "lib.rs").context(PathError)?).context(LibRsError)?;
 
     Ok(())
 }

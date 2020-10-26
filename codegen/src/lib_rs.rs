@@ -4,19 +4,26 @@ use crate::{
 };
 use proc_macro2::TokenStream;
 use quote::quote;
+use snafu::{ResultExt, Snafu};
 use std::path::Path;
 
-use crate::Result;
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+#[derive(Debug, Snafu)]
+pub enum Error {
+    CodeGenError { source: crate::codegen::Error },
+    WriteFileError { source: crate::Error },
+}
 
 pub fn create(feature_mod_names: &Vec<(String, String)>, path: &Path) -> Result<()> {
-    write_file(path, &create_body(feature_mod_names))?;
+    write_file(path, &create_body(feature_mod_names)?).context(WriteFileError)?;
     Ok(())
 }
 
-fn create_body(feature_mod_names: &Vec<(String, String)>) -> TokenStream {
+fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream> {
     let mut cfgs = TokenStream::new();
     for (feature_name, mod_name) in feature_mod_names {
-        let mod_name = ident(mod_name);
+        let mod_name = ident(mod_name).context(CodeGenError)?;
         cfgs.extend(quote! {
             #[cfg(feature = #feature_name)]
             mod #mod_name;
@@ -25,7 +32,7 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> TokenStream {
         });
     }
     let generated_by = create_generated_by_header();
-    quote! {
+    Ok(quote! {
         #generated_by
         #cfgs
 
@@ -55,6 +62,5 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> TokenStream {
                 }
             }
         }
-
-    }
+    })
 }
