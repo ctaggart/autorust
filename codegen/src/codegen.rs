@@ -626,8 +626,11 @@ fn create_function(
 
     // auth
     ts_request_builder.extend(quote! {
-        if let Some(token) = &operation_config.bearer_access_token {
-            req_builder = req_builder.bearer_auth(token);
+        if let Some(token_credential) = &operation_config.token_credential {
+            let token_response = token_credential
+                .get_token(&operation_config.token_credential_resource).await
+                .context(#fname::GetTokenError)?;
+            req_builder = req_builder.bearer_auth(token_response.token.secret());
         }
     });
 
@@ -916,6 +919,7 @@ fn create_function(
                 ExecuteRequestError { source: reqwest::Error },
                 ResponseBytesError { source: reqwest::Error },
                 DeserializeError { source: serde_json::Error, body: bytes::Bytes },
+                GetTokenError { source: azure_core::errors::AzureError },
             }
         }
     };
