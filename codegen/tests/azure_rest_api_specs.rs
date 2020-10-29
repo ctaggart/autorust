@@ -23,7 +23,7 @@ fn refs_count_avs() -> Result<()> {
         "../../azure-rest-api-specs/specification/vmware/resource-manager/Microsoft.AVS/stable/2020-03-20/vmware.json",
     )?;
     let refs = spec::get_refs(api);
-    assert_eq!(190, refs.len());
+    assert_eq!(197, refs.len());
     Ok(())
 }
 
