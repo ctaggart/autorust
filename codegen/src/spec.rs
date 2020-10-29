@@ -10,6 +10,7 @@ use std::{
 };
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
 #[derive(Debug, Snafu)]
 pub enum Error {
     PathJoin { source: path::Error },
@@ -25,40 +26,25 @@ pub enum Error {
 /// An API specification
 #[derive(Clone, Debug)]
 pub struct Spec {
-    /// Documents for an API specification where the first one is the root
+    /// A store of all the documents for an API specification keyed on their file paths where the first one is the root document
     pub docs: IndexMap<PathBuf, OpenAPI>,
     schemas: IndexMap<RefKey, Schema>,
     parameters: IndexMap<RefKey, Parameter>,
-    input_files: IndexSet<PathBuf>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct RefKey {
-    pub file: PathBuf,
-    pub name: String,
-}
-
-pub struct ResolvedSchema {
-    pub ref_key: Option<RefKey>,
-    pub schema: Schema,
+    input_files_paths: IndexSet<PathBuf>,
 }
 
 impl Spec {
-    pub fn is_input_file<P: AsRef<Path>>(&self, path: P) -> bool {
-        self.input_files.contains(path.as_ref())
-    }
-
-    pub fn read_files<P: AsRef<Path>>(input_files: &[P]) -> Result<Self> {
+    pub fn read_files<P: AsRef<Path>>(input_files_paths: &[P]) -> Result<Self> {
         let mut docs: IndexMap<PathBuf, OpenAPI> = IndexMap::new();
-        for input_file in input_files {
-            let doc = read_api_file(&input_file)?;
-            let files = get_ref_files(&doc)?;
+        for input_file in input_files_paths {
+            let doc = openapi::parse(&input_file)?;
+            let ref_files = openapi::get_ref_files(&doc);
             docs.insert(input_file.as_ref().to_owned(), doc);
 
-            for file in files {
-                let doc_path = path::join(&input_file, &file).context(PathJoin)?;
+            for ref_file in ref_files {
+                let doc_path = path::join(&input_file, &ref_file).context(PathJoin)?;
                 if !docs.contains_key(&doc_path) {
-                    let doc = read_api_file(&doc_path)?;
+                    let doc = openapi::parse(&doc_path)?;
                     docs.insert(doc_path, doc);
                 }
             }
@@ -66,15 +52,14 @@ impl Spec {
 
         let mut schemas: IndexMap<RefKey, Schema> = IndexMap::new();
         let mut parameters: IndexMap<RefKey, Parameter> = IndexMap::new();
-        for (file, doc) in &docs {
+        for (path, doc) in &docs {
             for (name, schema) in &doc.definitions {
                 match schema {
                     ReferenceOr::Reference { .. } => {}
                     ReferenceOr::Item(schema) => {
-                        // println!("insert schema {} {}", &file, &name);
                         schemas.insert(
                             RefKey {
-                                file: file.clone(),
+                                file: path.clone(),
                                 name: name.clone(),
                             },
                             schema.clone(),
@@ -82,11 +67,11 @@ impl Spec {
                     }
                 }
             }
+
             for (name, param) in &doc.parameters {
-                // println!("insert parameter {} {}", &file, name);
                 parameters.insert(
                     RefKey {
-                        file: file.clone(),
+                        file: path.clone(),
                         name: name.clone(),
                     },
                     param.clone(),
@@ -94,103 +79,92 @@ impl Spec {
             }
         }
 
-        Ok(Spec {
+        Ok(Self {
             docs,
             schemas,
             parameters,
-            input_files: input_files.iter().map(|f| f.as_ref().to_owned()).collect(),
+            input_files_paths: input_files_paths.iter().map(|f| f.as_ref().to_owned()).collect(),
         })
     }
 
-    pub fn resolve_schema_ref<P: Into<PathBuf>>(&self, doc_file: P, reference: &str) -> Result<ResolvedSchema> {
-        let doc_file: PathBuf = doc_file.into();
-        let rf = Reference::parse(reference);
-        let file = match rf.file {
-            None => doc_file.to_owned(),
-            Some(file) => path::join(doc_file, &file).context(PathJoin)?,
-        };
-        match rf.name {
-            // None => Err(format!("no name in reference {}", &reference))?,
-            None => NoNameInReference.fail(),
-            Some(nm) => {
-                let ref_key = RefKey {
-                    file: file.clone(),
-                    name: nm.clone(),
-                };
-                let schema = self
-                    .schemas
-                    .get(&ref_key)
-                    // .ok_or_else(|| format!("schema not found {} {}", &file.display(), &nm))?
-                    .context(SchemaNotFound)?
-                    .clone();
-                Ok(ResolvedSchema {
-                    ref_key: Some(ref_key),
-                    schema,
-                })
-            }
-        }
+    pub fn is_input_file<P: AsRef<Path>>(&self, path: P) -> bool {
+        self.input_files_paths.contains(path.as_ref())
     }
 
-    pub fn resolve_parameter_ref(&self, doc_file: &Path, reference: &str) -> Result<Parameter> {
-        let rf = Reference::parse(reference);
-        let file = match rf.file {
-            None => doc_file.to_owned(),
-            Some(file) => path::join(doc_file, &file).context(PathJoin)?,
+    /// Find the schema for a given doc path and reference
+    pub fn resolve_schema_ref<P: Into<PathBuf>>(&self, doc_path: P, reference: Reference) -> Result<ResolvedSchema> {
+        let doc_path: PathBuf = doc_path.into();
+        let full_path = match reference.file {
+            None => doc_path,
+            Some(file) => path::join(doc_path, &file).context(PathJoin)?,
         };
-        match rf.name {
-            // None => Err(format!("no name in reference {}", &reference))?,
-            None => NoNameInReference.fail(),
-            Some(nm) => Ok(self
-                .parameters
-                .get(&RefKey {
-                    file: file.clone(),
-                    name: nm.clone(),
-                })
-                // .ok_or_else(|| format!("parameter not found {} {}", &file.display(), &nm))?
-                .context(ParameterNotFound)?
-                .clone()),
-        }
+
+        let name = reference.name.ok_or_else(|| Error::NoNameInReference)?;
+        let ref_key = RefKey { file: full_path, name };
+        let schema = self.schemas.get(&ref_key).context(SchemaNotFound)?.clone();
+        Ok(ResolvedSchema {
+            ref_key: Some(ref_key),
+            schema,
+        })
     }
 
-    pub fn resolve_schema(&self, doc_file: &Path, schema: &ReferenceOr<Schema>) -> Result<ResolvedSchema> {
-        match schema {
+    /// Find the parameter for a given doc path and reference
+    pub fn resolve_parameter_ref<P: Into<PathBuf>>(&self, doc_path: P, reference: Reference) -> Result<Parameter> {
+        let doc_path: PathBuf = doc_path.into();
+        let full_path = match reference.file {
+            None => doc_path,
+            Some(file) => path::join(doc_path, &file).context(PathJoin)?,
+        };
+        let name = reference.name.ok_or_else(|| Error::NoNameInReference)?;
+        Ok(self
+            .parameters
+            .get(&RefKey { file: full_path, name })
+            .context(ParameterNotFound)?
+            .clone())
+    }
+
+    /// Resolve a reference or schema to a resolved schema
+    pub fn resolve_schema<P: AsRef<Path>>(&self, doc_path: P, ref_or_schema: &ReferenceOr<Schema>) -> Result<ResolvedSchema> {
+        match ref_or_schema {
             ReferenceOr::Item(schema) => Ok(ResolvedSchema {
                 ref_key: None,
                 schema: schema.clone(),
             }),
-            ReferenceOr::Reference { reference, .. } => self.resolve_schema_ref(doc_file, reference),
+            ReferenceOr::Reference { reference, .. } => self.resolve_schema_ref(doc_path.as_ref(), Reference::parse(reference)),
         }
     }
 
-    pub fn resolve_schemas(&self, doc_file: &Path, schemas: &Vec<ReferenceOr<Schema>>) -> Result<Vec<ResolvedSchema>> {
+    /// Resolve a collection of references or schemas to a collection of resolved schemas
+    pub fn resolve_schemas<P: AsRef<Path>>(&self, doc_path: P, ref_or_schemas: &[ReferenceOr<Schema>]) -> Result<Vec<ResolvedSchema>> {
         let mut resolved = Vec::new();
-        for schema in schemas {
-            resolved.push(self.resolve_schema(doc_file, schema)?);
+        for schema in ref_or_schemas {
+            resolved.push(self.resolve_schema(&doc_path, schema)?);
         }
         Ok(resolved)
     }
 
-    pub fn resolve_schema_map(
+    /// Resolve a collection of references or schemas to a collection of resolved schemas
+    pub fn resolve_schema_map<P: AsRef<Path>>(
         &self,
-        doc_file: &Path,
-        schemas: &IndexMap<String, ReferenceOr<Schema>>,
+        doc_path: P,
+        ref_or_schemas: &IndexMap<String, ReferenceOr<Schema>>,
     ) -> Result<IndexMap<String, ResolvedSchema>> {
         let mut resolved = IndexMap::new();
-        for (name, schema) in schemas {
-            resolved.insert(name.clone(), self.resolve_schema(doc_file, schema)?);
+        for (name, schema) in ref_or_schemas {
+            resolved.insert(name.clone(), self.resolve_schema(&doc_path, schema)?);
         }
         Ok(resolved)
     }
 
-    pub fn resolve_path(&self, _doc_file: &Path, path: &ReferenceOr<PathItem>) -> Result<PathItem> {
+    pub fn resolve_path<P: AsRef<Path>>(&self, _doc_path: P, path: &ReferenceOr<PathItem>) -> Result<PathItem> {
         match path {
             ReferenceOr::Item(path) => Ok(path.clone()),
             ReferenceOr::Reference { .. } =>
             // self.resolve_path_ref(doc_file, reference),
             {
-                // Err("path references not implemented")?
+                // TODO
                 NotImplemented.fail()
-            } // TODO
+            }
         }
     }
 
@@ -205,7 +179,7 @@ impl Spec {
     pub fn resolve_parameter(&self, doc_file: &Path, parameter: &ReferenceOr<Parameter>) -> Result<Parameter> {
         match parameter {
             ReferenceOr::Item(param) => Ok(param.clone()),
-            ReferenceOr::Reference { reference, .. } => self.resolve_parameter_ref(doc_file, reference),
+            ReferenceOr::Reference { reference, .. } => self.resolve_parameter_ref(doc_file, Reference::parse(reference)),
         }
     }
 
@@ -218,16 +192,43 @@ impl Spec {
     }
 }
 
-pub fn read_api_file<P: AsRef<Path>>(path: P) -> Result<OpenAPI> {
-    let path = path.as_ref();
-    let bytes = fs::read(path).context(ReadFile)?;
-    let api = if path.extension() == Some(OsStr::new("yaml")) || path.extension() == Some(OsStr::new("yml")) {
-        serde_yaml::from_slice(&bytes).context(DeserializeYaml)?
-    } else {
-        serde_json::from_slice(&bytes).context(DeserializeJson)?
-    };
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct RefKey {
+    pub file: PathBuf,
+    pub name: String,
+}
 
-    Ok(api)
+pub struct ResolvedSchema {
+    pub ref_key: Option<RefKey>,
+    pub schema: Schema,
+}
+
+pub mod openapi {
+    use super::*;
+
+    /// Parse an OpenAPI object from a file located at `path`
+    pub fn parse<P: AsRef<Path>>(path: P) -> Result<OpenAPI> {
+        let path = path.as_ref();
+        let bytes = fs::read(path).context(ReadFile)?;
+        let api = if path.extension() == Some(OsStr::new("yaml")) || path.extension() == Some(OsStr::new("yml")) {
+            serde_yaml::from_slice(&bytes).context(DeserializeYaml)?
+        } else {
+            serde_json::from_slice(&bytes).context(DeserializeJson)?
+        };
+
+        Ok(api)
+    }
+
+    /// Returns a set of referenced relative file paths
+    pub fn get_ref_files(api: &OpenAPI) -> IndexSet<String> {
+        get_refs(api)
+            .iter()
+            .filter_map(|rf| match rf {
+                RefString::Example(_) => None,
+                rs => Reference::parse(rs.as_str()).file,
+            })
+            .collect()
+    }
 }
 
 pub enum OperationVerb<'a> {
@@ -294,7 +295,7 @@ fn create_function_name(path: &str, verb_name: &str) -> String {
     path.join("_")
 }
 
-pub fn pathitem_operations(item: &PathItem) -> impl Iterator<Item = OperationVerb> {
+pub fn path_item_operations(item: &PathItem) -> impl Iterator<Item = OperationVerb> {
     vec![
         item.get.as_ref().map(OperationVerb::Get),
         item.post.as_ref().map(OperationVerb::Post),
@@ -317,14 +318,20 @@ pub enum RefString {
     Example(String),
 }
 
+impl RefString {
+    fn as_str(&self) -> &str {
+        match self {
+            RefString::PathItem(s) => s,
+            RefString::Parameter(s) => s,
+            RefString::Schema(s) => s,
+            RefString::Example(s) => s,
+        }
+    }
+}
+
 impl ToString for RefString {
     fn to_string(&self) -> String {
-        match self {
-            RefString::PathItem(s) => s.to_owned(),
-            RefString::Parameter(s) => s.to_owned(),
-            RefString::Schema(s) => s.to_owned(),
-            RefString::Example(s) => s.to_owned(),
-        }
+        self.as_str().to_owned()
     }
 }
 
@@ -369,11 +376,11 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
         match item {
             ReferenceOr::Reference { reference, .. } => list.push(RefString::PathItem(reference.clone())),
             ReferenceOr::Item(item) => {
-                for verb in pathitem_operations(&item) {
+                for verb in path_item_operations(&item) {
                     let op = verb.operation();
                     // parameters
-                    for prm in &op.parameters {
-                        match prm {
+                    for param in &op.parameters {
+                        match param {
                             ReferenceOr::Reference { reference, .. } => list.push(RefString::Parameter(reference.clone())),
                             ReferenceOr::Item(parameter) => match &parameter.schema {
                                 Some(ReferenceOr::Reference { reference, .. }) => list.push(RefString::Schema(reference.clone())),
@@ -413,25 +420,6 @@ pub fn get_refs(api: &OpenAPI) -> Vec<RefString> {
     }
 
     list
-}
-
-/// returns a set of referenced files
-pub fn get_ref_files(api: &OpenAPI) -> Result<IndexSet<String>> {
-    let ref_strings: IndexSet<_> = get_refs(api)
-        .iter()
-        .filter_map(|rf| match rf {
-            RefString::Example(_) => None,
-            rs => Some(rs.to_string()),
-        })
-        .collect();
-
-    let mut set = IndexSet::new();
-    for s in &ref_strings {
-        if let Some(file) = Reference::parse(s).file {
-            set.insert(file);
-        }
-    }
-    Ok(set)
 }
 
 pub fn get_api_schema_refs(api: &OpenAPI) -> Vec<String> {
