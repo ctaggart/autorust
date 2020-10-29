@@ -3,7 +3,8 @@
 // git clone git@github.com:Azure/azure-rest-api-specs.git ../azure-rest-api-specs
 
 use autorust_codegen::*;
-use spec::RefString;
+use autorust_openapi::Reference;
+use spec::TypedReference;
 use std::path::PathBuf;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -50,10 +51,10 @@ fn read_spec_avs() -> Result<()> {
 fn test_resolve_schema_ref() -> Result<()> {
     let file = PathBuf::from(VMWARE_SPEC);
     let spec = &Spec::read_files(&[&file])?;
-    spec.resolve_schema_ref(&file, Reference::parse("#/definitions/OperationList"))?;
+    spec.resolve_schema_ref(&file, Reference::parse("#/definitions/OperationList").unwrap())?;
     spec.resolve_schema_ref(
         &file,
-        Reference::parse("../../../../../common-types/resource-management/v1/types.json#/definitions/ErrorResponse"),
+        Reference::parse("../../../../../common-types/resource-management/v1/types.json#/definitions/ErrorResponse").unwrap(),
     )?;
     Ok(())
 }
@@ -64,7 +65,7 @@ fn test_resolve_parameter_ref() -> Result<()> {
     let spec = &Spec::read_files(&[&file])?;
     spec.resolve_parameter_ref(
         &file,
-        Reference::parse("../../../../../common-types/resource-management/v1/types.json#/parameters/ApiVersionParameter"),
+        Reference::parse("../../../../../common-types/resource-management/v1/types.json#/parameters/ApiVersionParameter").unwrap(),
     )?;
     Ok(())
 }
@@ -77,13 +78,13 @@ fn test_resolve_all_refs() -> Result<()> {
         let refs = spec::get_refs(doc);
         for rs in refs {
             match rs {
-                RefString::PathItem(_) => {}
-                RefString::Example(_) => {}
-                RefString::Parameter(reference) => {
-                    spec.resolve_parameter_ref(&doc_file, Reference::parse(&reference))?;
+                TypedReference::PathItem(_) => {}
+                TypedReference::Example(_) => {}
+                TypedReference::Parameter(reference) => {
+                    spec.resolve_parameter_ref(&doc_file, reference)?;
                 }
-                RefString::Schema(reference) => {
-                    spec.resolve_schema_ref(&doc_file, Reference::parse(&reference))?;
+                TypedReference::Schema(reference) => {
+                    spec.resolve_schema_ref(&doc_file, reference)?;
                 }
             }
         }

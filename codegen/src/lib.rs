@@ -4,12 +4,10 @@ pub mod config_parser;
 pub mod identifier;
 pub mod lib_rs;
 pub mod path;
-mod reference;
 pub mod spec;
 mod status_codes;
 pub use self::{
     codegen::{create_mod, CodeGen},
-    reference::Reference,
     spec::{OperationVerb, ResolvedSchema, Spec},
 };
 use proc_macro2::TokenStream;

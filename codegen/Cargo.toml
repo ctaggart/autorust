@@ -7,8 +7,8 @@ edition = "2018"
 [lib]
 
 [dependencies]
-autorust_openapi = { rev = "181baf2b89d32c013258e40b59d3e00bb501c9c4", git = "https://github.com/ctaggart/autorust_openapi" }
-# autorust_openapi = { path = "../autorust_openapi" }
+autorust_openapi = { rev = "0e898b8c9d8185c9f9a49e056ce42e5669424f6b", git = "https://github.com/rylev/autorust_openapi" }
+# autorust_openapi = { path = "../../autorust_openapi" }
 quote = "*"
 proc-macro2 = { version = "*", default-features = false }
 serde_json = "*"

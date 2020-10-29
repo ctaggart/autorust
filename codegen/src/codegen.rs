@@ -2,9 +2,11 @@ use crate::{
     identifier::{ident, CamelCaseIdent},
     spec,
     status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses, has_default_response},
-    Config, OperationVerb, Reference, ResolvedSchema, Spec,
+    Config, OperationVerb, ResolvedSchema, Spec,
 };
-use autorust_openapi::{CollectionFormat, DataType, Parameter, ParameterType, PathItem, ReferenceOr, Response, Schema, SchemaCommon};
+use autorust_openapi::{
+    CollectionFormat, DataType, Parameter, ParameterType, PathItem, Reference, ReferenceOr, Response, Schema, SchemaCommon,
+};
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
@@ -102,8 +104,8 @@ impl CodeGen {
         // any referenced schemas from other files
         for (doc_file, doc) in &self.spec.docs {
             if self.spec.is_input_file(doc_file) {
-                for rf in get_api_schema_refs(doc) {
-                    self.add_schema_refs(&mut all_schemas, doc_file, Reference::parse(&rf))?;
+                for reference in get_api_schema_refs(doc) {
+                    self.add_schema_refs(&mut all_schemas, doc_file, reference)?;
                 }
             }
         }
@@ -201,8 +203,8 @@ impl CodeGen {
                 if !self.spec.is_input_file(&ref_key.file) {
                     let refs = get_schema_schema_refs(&schema.schema);
                     schemas.insert(ref_key.clone(), schema);
-                    for rf in refs {
-                        self.add_schema_refs(schemas, &ref_key.file, Reference::parse(&rf))?;
+                    for reference in refs {
+                        self.add_schema_refs(schemas, &ref_key.file, reference)?;
                     }
                 }
             }
@@ -514,6 +516,7 @@ fn get_type_name_for_schema(schema: &SchemaCommon, as_ref: AsReference) -> Resul
                 AsReference::True => quote! { &serde_json::Value },
                 AsReference::False => quote! { serde_json::Value },
             },
+            DataType::File => todo!("Handle DataType::File"),
         };
         Ok(ts)
     } else {
@@ -531,8 +534,7 @@ fn get_type_name_for_schema(schema: &SchemaCommon, as_ref: AsReference) -> Resul
 fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>, as_ref: AsReference) -> Result<TokenStream> {
     match schema {
         ReferenceOr::Reference { reference, .. } => {
-            let rf = Reference::parse(&reference);
-            let name = &rf.name.context(NoNameForRef)?;
+            let name = &reference.name.as_ref().context(NoNameForRef)?;
             let idt = ident(&name.to_camel_case()).context(IdentError {
                 file: file!(),
                 line: line!(),

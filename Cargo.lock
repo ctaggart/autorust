@@ -68,7 +68,7 @@ dependencies = [
 [[package]]
 name = "autorust_openapi"
 version = "0.2.0"
-source = "git+https://github.com/ctaggart/autorust_openapi?rev=181baf2b89d32c013258e40b59d3e00bb501c9c4#181baf2b89d32c013258e40b59d3e00bb501c9c4"
+source = "git+https://github.com/rylev/autorust_openapi?rev=0e898b8c9d8185c9f9a49e056ce42e5669424f6b#0e898b8c9d8185c9f9a49e056ce42e5669424f6b"
 dependencies = [
  "indexmap",
  "serde",
