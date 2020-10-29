@@ -11,7 +11,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 #[test]
 fn refs_count_security_common() -> Result<()> {
-    let api = &spec::read_api_file("../../azure-rest-api-specs/specification/security/resource-manager/common/v1/types.json")?;
+    let api = &spec::openapi::parse("../../azure-rest-api-specs/specification/security/resource-manager/common/v1/types.json")?;
     let refs = spec::get_refs(api);
     assert_eq!(13, refs.len());
     Ok(())
@@ -19,7 +19,7 @@ fn refs_count_security_common() -> Result<()> {
 
 #[test]
 fn refs_count_avs() -> Result<()> {
-    let api = &spec::read_api_file(
+    let api = &spec::openapi::parse(
         "../../azure-rest-api-specs/specification/vmware/resource-manager/Microsoft.AVS/stable/2020-03-20/vmware.json",
     )?;
     let refs = spec::get_refs(api);
@@ -29,10 +29,10 @@ fn refs_count_avs() -> Result<()> {
 
 #[test]
 fn ref_files() -> Result<()> {
-    let api = &spec::read_api_file(
+    let api = &spec::openapi::parse(
         "../../azure-rest-api-specs/specification/vmware/resource-manager/Microsoft.AVS/stable/2020-03-20/vmware.json",
     )?;
-    let files = spec::get_ref_files(api)?;
+    let files = spec::openapi::get_ref_files(api);
     assert_eq!(1, files.len());
     assert!(files.contains("../../../../../common-types/resource-management/v1/types.json"));
     Ok(())
@@ -55,10 +55,10 @@ fn test_resolve_schema_ref() -> Result<()> {
     let file =
         PathBuf::from("../../azure-rest-api-specs/specification/vmware/resource-manager/Microsoft.AVS/stable/2020-03-20/vmware.json");
     let spec = &Spec::read_files(&[&file])?;
-    spec.resolve_schema_ref(&file, "#/definitions/OperationList")?;
+    spec.resolve_schema_ref(&file, Reference::parse("#/definitions/OperationList"))?;
     spec.resolve_schema_ref(
         &file,
-        "../../../../../common-types/resource-management/v1/types.json#/definitions/ErrorResponse",
+        Reference::parse("../../../../../common-types/resource-management/v1/types.json#/definitions/ErrorResponse"),
     )?;
     Ok(())
 }
@@ -70,7 +70,7 @@ fn test_resolve_parameter_ref() -> Result<()> {
     let spec = &Spec::read_files(&[&file])?;
     spec.resolve_parameter_ref(
         &file,
-        "../../../../../common-types/resource-management/v1/types.json#/parameters/ApiVersionParameter",
+        Reference::parse("../../../../../common-types/resource-management/v1/types.json#/parameters/ApiVersionParameter"),
     )?;
     Ok(())
 }
@@ -87,10 +87,10 @@ fn test_resolve_all_refs() -> Result<()> {
                 RefString::PathItem(_) => {}
                 RefString::Example(_) => {}
                 RefString::Parameter(reference) => {
-                    spec.resolve_parameter_ref(&doc_file, &reference)?;
+                    spec.resolve_parameter_ref(&doc_file, Reference::parse(&reference))?;
                 }
                 RefString::Schema(reference) => {
-                    spec.resolve_schema_ref(&doc_file, &reference)?;
+                    spec.resolve_schema_ref(&doc_file, Reference::parse(&reference))?;
                 }
             }
         }
