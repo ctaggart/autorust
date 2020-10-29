@@ -112,7 +112,7 @@ impl Spec {
 
         let name = reference.name.ok_or_else(|| Error::NoNameInReference)?;
         let ref_key = RefKey { file: full_path, name };
-        let schema = self.schemas.get(&ref_key).context(SchemaNotFound)?.clone();
+        let schema = self.schemas.get(&ref_key).context(SchemaNotFound { ref_key: ref_key.clone() })?.clone();
         Ok(ResolvedSchema {
             ref_key: Some(ref_key),
             schema,
