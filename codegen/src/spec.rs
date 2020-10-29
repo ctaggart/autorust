@@ -72,7 +72,6 @@ impl Spec {
                             file: path.clone(),
                             name: name.clone(),
                         };
-                        // println!("{:?}", ref_key);
                         schemas.insert(ref_key, schema.clone());
                     }
                 }
@@ -104,12 +103,10 @@ impl Spec {
     /// Find the schema for a given doc path and reference
     pub fn resolve_schema_ref<P: Into<PathBuf>>(&self, doc_path: P, reference: Reference) -> Result<ResolvedSchema> {
         let doc_path: PathBuf = doc_path.into();
-        // println!("{:?} {:?}", doc_path, reference);
         let full_path = match reference.file {
             None => doc_path,
             Some(file) => path::join(doc_path, &file).context(PathJoin)?,
         };
-        // println!("{:?}", full_path);
 
         let name = reference.name.ok_or_else(|| Error::NoNameInReference)?;
         let ref_key = RefKey { file: full_path, name };
