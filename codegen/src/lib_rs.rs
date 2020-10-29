@@ -11,8 +11,14 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    CodeGenError { source: crate::codegen::Error },
-    WriteFileError { source: crate::Error },
+    IdentModNameError {
+        source: crate::codegen::Error,
+        feature_name: String,
+        mod_name: String,
+    },
+    WriteFileError {
+        source: crate::Error,
+    },
 }
 
 pub fn create(feature_mod_names: &Vec<(String, String)>, path: &Path) -> Result<()> {
@@ -23,7 +29,10 @@ pub fn create(feature_mod_names: &Vec<(String, String)>, path: &Path) -> Result<
 fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream> {
     let mut cfgs = TokenStream::new();
     for (feature_name, mod_name) in feature_mod_names {
-        let mod_name = ident(mod_name).context(CodeGenError)?;
+        let mod_name = ident(mod_name).context(IdentModNameError {
+            feature_name: feature_name.to_owned(),
+            mod_name: mod_name.to_owned(),
+        })?;
         cfgs.extend(quote! {
             #[cfg(feature = #feature_name)]
             mod #mod_name;

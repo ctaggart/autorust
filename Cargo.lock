@@ -77,12 +77,13 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "snafu",
+ "syn",
 ]
 
 [[package]]
 name = "autorust_openapi"
 version = "0.2.0"
-source = "git+https://github.com/ctaggart/autorust_openapi#181baf2b89d32c013258e40b59d3e00bb501c9c4"
+source = "git+https://github.com/ctaggart/autorust_openapi?rev=181baf2b89d32c013258e40b59d3e00bb501c9c4#181baf2b89d32c013258e40b59d3e00bb501c9c4"
 dependencies = [
  "indexmap",
  "serde",
@@ -352,9 +353,9 @@ checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
 name = "memchr"
-version = "2.3.3"
+version = "2.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3728d817d99e5ac407411fa471ff9800a778d88a24685968b36824eaf4bee400"
+checksum = "0ee1c47aaa256ecabcaea351eae4a9b01ef39ed810004e298d2511ed284b1525"
 
 [[package]]
 name = "miniz_oxide"

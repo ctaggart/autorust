@@ -12,14 +12,25 @@ use std::{
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Snafu)]
 pub enum Error {
-    PathJoin { source: path::Error },
-    SchemaNotFound,
+    PathJoin {
+        source: path::Error,
+    },
+    #[snafu(display("SchemaNotFound {} {}", ref_key.file.display(), ref_key.name))]
+    SchemaNotFound {
+        ref_key: RefKey,
+    },
     NoNameInReference,
     ParameterNotFound,
     NotImplemented,
-    ReadFile { source: std::io::Error },
-    DeserializeYaml { source: serde_yaml::Error },
-    DeserializeJson { source: serde_json::Error },
+    ReadFile {
+        source: std::io::Error,
+    },
+    DeserializeYaml {
+        source: serde_yaml::Error,
+    },
+    DeserializeJson {
+        source: serde_json::Error,
+    },
 }
 
 /// An API specification
@@ -110,7 +121,6 @@ impl Spec {
             Some(file) => path::join(doc_file, &file).context(PathJoin)?,
         };
         match rf.name {
-            // None => Err(format!("no name in reference {}", &reference))?,
             None => NoNameInReference.fail(),
             Some(nm) => {
                 let ref_key = RefKey {
@@ -121,7 +131,7 @@ impl Spec {
                     .schemas
                     .get(&ref_key)
                     // .ok_or_else(|| format!("schema not found {} {}", &file.display(), &nm))?
-                    .context(SchemaNotFound)?
+                    .context(SchemaNotFound { ref_key: ref_key.clone() })?
                     .clone();
                 Ok(ResolvedSchema {
                     ref_key: Some(ref_key),

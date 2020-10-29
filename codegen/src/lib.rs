@@ -12,7 +12,7 @@ pub use self::{
     spec::{OperationVerb, ResolvedSchema, Spec},
 };
 use proc_macro2::TokenStream;
-use snafu::{Backtrace, ResultExt, Snafu};
+use snafu::{ResultExt, Snafu};
 use std::{
     fs::{self, File},
     io::prelude::*,
@@ -41,9 +41,16 @@ pub enum Error {
         file: PathBuf,
         source: std::io::Error,
     },
-    CodeGenError {
+    CodeGenNewError {
         source: codegen::Error,
-        backtrace: Backtrace,
+    },
+    #[snafu(display("CreateModelsError {} {}", config.output_folder.display(), source))]
+    CreateModelsError {
+        source: codegen::Error,
+        config: Config,
+    },
+    CreateOperationsError {
+        source: codegen::Error,
     },
     PathError {
         source: path::Error,
@@ -60,15 +67,15 @@ pub struct Config {
 pub fn run(config: Config) -> Result<()> {
     let directory = &config.output_folder;
     fs::create_dir_all(directory).context(CreateOutputDirectoryError { directory })?;
-    let cg = &CodeGen::new(config.clone()).context(CodeGenError)?;
+    let cg = &CodeGen::new(config.clone()).context(CodeGenNewError)?;
 
     // create models from schemas
-    let models = cg.create_models().context(CodeGenError)?;
+    let models = cg.create_models().context(CreateModelsError { config: config.clone() })?;
     let models_path = path::join(&config.output_folder, "models.rs").context(PathError)?;
     write_file(&models_path, &models)?;
 
     // create api client from operations
-    let operations = cg.create_operations().context(CodeGenError)?;
+    let operations = cg.create_operations().context(CreateOperationsError)?;
     let operations_path = path::join(&config.output_folder, "operations.rs").context(PathError)?;
     write_file(&operations_path, &operations)?;
 

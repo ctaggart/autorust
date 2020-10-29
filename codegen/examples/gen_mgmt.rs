@@ -6,7 +6,7 @@ use autorust_codegen::{
     lib_rs, path, Config,
 };
 use heck::SnakeCase;
-use snafu::{ErrorCompat, OptionExt, ResultExt, Snafu};
+use snafu::{OptionExt, ResultExt, Snafu};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -21,7 +21,6 @@ const SERVICE_NAMES: &[(&str, &str)] = &[
     ];
 
 const ONLY_SERVICES: &[&str] = &[
-    // "datafactory",
     // "network",
 ];
 
@@ -61,6 +60,7 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("azureactivedirectory", "package-preview-2020-07"),
     ("resources", "package-policy-2020-03"),
     ("recoveryservicesbackup", "package-2020-07"), // duplicate fn get_operation_status
+    ("network", "package-2017-03-30-only"),        // SchemaNotFound 2017-09-01/network.json SubResource
 ];
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -112,10 +112,10 @@ where
         }
     }
 
-    if let Some(backtrace) = ErrorCompat::backtrace(err) {
-        eprintln!("Backtrace:");
-        eprintln!("{}", backtrace);
-    }
+    // if let Some(backtrace) = ErrorCompat::backtrace(err) {
+    //     eprintln!("Backtrace:");
+    //     eprintln!("{}", backtrace);
+    // }
 }
 
 fn run() -> Result<()> {
