@@ -57,23 +57,6 @@ impl CodeGen {
         self.config.api_version.as_deref()
     }
 
-    // For create_models. Recursively adds schema refs.
-    fn add_schema_refs(&self, schemas: &mut IndexMap<RefKey, ResolvedSchema>, doc_file: &Path, schema_ref: &str) -> Result<()> {
-        let schema = self.spec.resolve_schema_ref(doc_file, schema_ref).context(SpecError)?;
-        if let Some(ref_key) = schema.ref_key.clone() {
-            if !schemas.contains_key(&ref_key) {
-                if !self.spec.is_input_file(&ref_key.file) {
-                    let refs = get_schema_schema_refs(&schema.schema);
-                    schemas.insert(ref_key.clone(), schema);
-                    for rf in refs {
-                        self.add_schema_refs(schemas, &ref_key.file, &rf)?;
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
     pub fn create_models(&self) -> Result<TokenStream> {
         let mut file = TokenStream::new();
         file.extend(create_generated_by_header());
@@ -104,7 +87,7 @@ impl CodeGen {
         for (doc_file, doc) in &self.spec.docs {
             if self.spec.is_input_file(doc_file) {
                 for rf in get_api_schema_refs(doc) {
-                    self.add_schema_refs(&mut all_schemas, doc_file, &rf)?;
+                    self.add_schema_refs(&mut all_schemas, doc_file, Reference::parse(&rf))?;
                 }
             }
         }
@@ -152,7 +135,7 @@ impl CodeGen {
             let paths = self.spec.resolve_path_map(doc_file, &doc.paths).context(SpecError)?;
             for (path, item) in &paths {
                 // println!("{}", path);
-                for op in spec::pathitem_operations(item) {
+                for op in spec::path_item_operations(item) {
                     // println!("{:?}", op.operation_id);
                     let (module_name, function_name) = op.function_name(path);
                     let function = create_function(self, doc_file, path, item, &op, &param_re, &function_name)?;
@@ -189,6 +172,23 @@ impl CodeGen {
             }
         }
         Ok(file)
+    }
+
+    // For create_models. Recursively adds schema refs.
+    fn add_schema_refs(&self, schemas: &mut IndexMap<RefKey, ResolvedSchema>, doc_file: &Path, schema_ref: Reference) -> Result<()> {
+        let schema = self.spec.resolve_schema_ref(doc_file, schema_ref).context(SpecError)?;
+        if let Some(ref_key) = schema.ref_key.clone() {
+            if !schemas.contains_key(&ref_key) {
+                if !self.spec.is_input_file(&ref_key.file) {
+                    let refs = get_schema_schema_refs(&schema.schema);
+                    schemas.insert(ref_key.clone(), schema);
+                    for rf in refs {
+                        self.add_schema_refs(schemas, &ref_key.file, Reference::parse(&rf))?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn create_vec_alias(&self, doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
