@@ -2,7 +2,6 @@ use path_abs::PathMut;
 use snafu::{ResultExt, Snafu};
 use std::path::{Path, PathBuf};
 
-// pub type StdError = std:error::Error;
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Snafu)]
 pub enum Error {

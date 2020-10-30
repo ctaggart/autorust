@@ -13,14 +13,25 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, Snafu)]
 pub enum Error {
-    PathJoin { source: path::Error },
-    SchemaNotFound,
+    PathJoin {
+        source: path::Error,
+    },
+    #[snafu(display("SchemaNotFound {} {}", ref_key.file.display(), ref_key.name))]
+    SchemaNotFound {
+        ref_key: RefKey,
+    },
     NoNameInReference,
     ParameterNotFound,
     NotImplemented,
-    ReadFile { source: std::io::Error },
-    DeserializeYaml { source: serde_yaml::Error },
-    DeserializeJson { source: serde_json::Error },
+    ReadFile {
+        source: std::io::Error,
+    },
+    DeserializeYaml {
+        source: serde_yaml::Error,
+    },
+    DeserializeJson {
+        source: serde_json::Error,
+    },
 }
 
 /// An API specification
@@ -57,13 +68,12 @@ impl Spec {
                 match schema {
                     ReferenceOr::Reference { .. } => {}
                     ReferenceOr::Item(schema) => {
-                        schemas.insert(
-                            RefKey {
-                                file: path.clone(),
-                                name: name.clone(),
-                            },
-                            schema.clone(),
-                        );
+                        let ref_key = RefKey {
+                            file: path.clone(),
+                            name: name.clone(),
+                        };
+                        // println!("{:?}", ref_key);
+                        schemas.insert(ref_key, schema.clone());
                     }
                 }
             }
@@ -94,14 +104,20 @@ impl Spec {
     /// Find the schema for a given doc path and reference
     pub fn resolve_schema_ref<P: Into<PathBuf>>(&self, doc_path: P, reference: Reference) -> Result<ResolvedSchema> {
         let doc_path: PathBuf = doc_path.into();
+        // println!("{:?} {:?}", doc_path, reference);
         let full_path = match reference.file {
             None => doc_path,
             Some(file) => path::join(doc_path, &file).context(PathJoin)?,
         };
+        // println!("{:?}", full_path);
 
         let name = reference.name.ok_or_else(|| Error::NoNameInReference)?;
         let ref_key = RefKey { file: full_path, name };
-        let schema = self.schemas.get(&ref_key).context(SchemaNotFound)?.clone();
+        let schema = self
+            .schemas
+            .get(&ref_key)
+            .context(SchemaNotFound { ref_key: ref_key.clone() })?
+            .clone();
         Ok(ResolvedSchema {
             ref_key: Some(ref_key),
             schema,

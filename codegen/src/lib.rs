@@ -1,6 +1,7 @@
 pub mod cargo_toml;
 mod codegen;
 pub mod config_parser;
+pub mod identifier;
 pub mod lib_rs;
 pub mod path;
 mod reference;
@@ -22,24 +23,33 @@ use std::{
 extern crate lazy_static;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
 #[derive(Debug, Snafu)]
 pub enum Error {
     #[snafu(display("Could not create output directory {}: {}", directory.display(), source))]
-    CreateOutputDirectory {
+    CreateOutputDirectoryError {
         directory: PathBuf,
         source: std::io::Error,
     },
     #[snafu(display("Could not create file {}: {}", file.display(), source))]
-    CreateFile {
+    CreateFileError {
         file: PathBuf,
         source: std::io::Error,
     },
     #[snafu(display("Could not write file {}: {}", file.display(), source))]
-    WriteFile {
+    WriteFileError {
         file: PathBuf,
         source: std::io::Error,
     },
-    CodeGenError {
+    CodeGenNewError {
+        source: codegen::Error,
+    },
+    #[snafu(display("CreateModelsError {} {}", config.output_folder.display(), source))]
+    CreateModelsError {
+        source: codegen::Error,
+        config: Config,
+    },
+    CreateOperationsError {
         source: codegen::Error,
     },
     PathError {
@@ -56,16 +66,16 @@ pub struct Config {
 
 pub fn run(config: Config) -> Result<()> {
     let directory = &config.output_folder;
-    fs::create_dir_all(directory).context(CreateOutputDirectory { directory })?;
-    let cg = &CodeGen::new(config.clone()).context(CodeGenError)?;
+    fs::create_dir_all(directory).context(CreateOutputDirectoryError { directory })?;
+    let cg = &CodeGen::new(config.clone()).context(CodeGenNewError)?;
 
     // create models from schemas
-    let models = cg.create_models().context(CodeGenError)?;
+    let models = cg.create_models().context(CreateModelsError { config: config.clone() })?;
     let models_path = path::join(&config.output_folder, "models.rs").context(PathError)?;
     write_file(&models_path, &models)?;
 
     // create api client from operations
-    let operations = cg.create_operations().context(CodeGenError)?;
+    let operations = cg.create_operations().context(CreateOperationsError)?;
     let operations_path = path::join(&config.output_folder, "operations.rs").context(PathError)?;
     write_file(&operations_path, &operations)?;
 
@@ -81,7 +91,7 @@ pub fn write_file<P: Into<PathBuf>>(file: P, tokens: &TokenStream) -> Result<()>
     let file: PathBuf = file.into();
     println!("writing file {}", &file.display());
     let code = tokens.to_string();
-    let mut buffer = File::create(&file).context(CreateFile { file: file.clone() })?;
-    buffer.write_all(&code.as_bytes()).context(WriteFile { file })?;
+    let mut buffer = File::create(&file).context(CreateFileError { file: file.clone() })?;
+    buffer.write_all(&code.as_bytes()).context(WriteFileError { file })?;
     Ok(())
 }

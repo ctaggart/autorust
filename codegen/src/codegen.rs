@@ -1,5 +1,5 @@
-#![allow(unused_variables, dead_code)]
 use crate::{
+    identifier::{ident, CamelCaseIdent},
     spec,
     status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses, has_default_response},
     Config, OperationVerb, Reference, ResolvedSchema, Spec,
@@ -8,7 +8,7 @@ use autorust_openapi::{CollectionFormat, DataType, Parameter, ParameterType, Pat
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote, ToTokens};
+use quote::quote;
 use regex::Regex;
 use serde_json::Value;
 use snafu::{OptionExt, ResultExt, Snafu};
@@ -21,9 +21,25 @@ use std::{
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Snafu)]
 pub enum Error {
-    SpecError { source: spec::Error },
+    SpecError {
+        source: spec::Error,
+    },
     ArrayExpectedToHaveItems,
     NoNameForRef,
+    #[snafu(display("IdentError at {}:{} {} ", file, line, source))]
+    IdentError {
+        // #[snafu(source(from(Error, Box::new)))]
+        source: crate::identifier::Error,
+        file: &'static str,
+        line: u32,
+    },
+    #[snafu(display("CreateEnumIdentError {} {} {}", property_name, enum_value, source))]
+    CreateEnumIdentError {
+        #[snafu(source(from(Error, Box::new)))]
+        source: Box<Error>,
+        property_name: String,
+        enum_value: String,
+    },
 }
 
 /// Whether or not to pass a type is a reference.
@@ -96,7 +112,7 @@ impl CodeGen {
         for (ref_key, schema) in &all_schemas {
             let doc_file = &ref_key.file;
             let schema_name = &ref_key.name;
-            if let Some(first_doc_file) = schema_names.insert(schema_name, doc_file) {
+            if let Some(_first_doc_file) = schema_names.insert(schema_name, doc_file) {
                 // eprintln!(
                 //     "WARN schema {} already created from {:?}, duplicate from {:?}",
                 //     schema_name, first_doc_file, doc_file
@@ -106,7 +122,7 @@ impl CodeGen {
                     file.extend(self.create_vec_alias(doc_file, schema_name, schema)?);
                 } else if is_local_enum(schema) {
                     let no_namespace = TokenStream::new();
-                    let (_tp_name, tp) = create_enum(&no_namespace, schema_name, schema);
+                    let (_tp_name, tp) = create_enum(&no_namespace, schema_name, schema)?;
                     file.extend(tp);
                 } else {
                     for stream in self.create_struct(doc_file, schema_name, schema)? {
@@ -156,7 +172,10 @@ impl CodeGen {
         for (module_name, module) in modules {
             match module_name {
                 Some(module_name) => {
-                    let name = ident(&module_name);
+                    let name = ident(&module_name).context(IdentError {
+                        file: file!(),
+                        line: line!(),
+                    })?;
                     file.extend(quote! {
                         pub mod #name {
                             use crate::models::*;
@@ -191,9 +210,12 @@ impl CodeGen {
         Ok(())
     }
 
-    fn create_vec_alias(&self, doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
+    fn create_vec_alias(&self, _doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
         let items = get_schema_array_items(&schema.schema.common)?;
-        let typ = ident(&alias_name.to_camel_case());
+        let typ = ident(&alias_name.to_camel_case()).context(IdentError {
+            file: file!(),
+            line: line!(),
+        })?;
         let items_typ = get_type_name_for_schema_ref(&items, AsReference::False)?;
         Ok(quote! { pub type #typ = Vec<#items_typ>; })
     }
@@ -203,13 +225,22 @@ impl CodeGen {
         let mut streams = Vec::new();
         let mut local_types = Vec::new();
         let mut props = TokenStream::new();
-        let ns = ident(&struct_name.to_snake_case());
-        let nm = ident(&struct_name.to_camel_case());
+        let ns = ident(&struct_name.to_snake_case()).context(IdentError {
+            file: file!(),
+            line: line!(),
+        })?;
+        let nm = ident(&struct_name.to_camel_case()).context(IdentError {
+            file: file!(),
+            line: line!(),
+        })?;
         let required: HashSet<&str> = schema.schema.required.iter().map(String::as_str).collect();
 
         for schema in &schema.schema.all_of {
             let type_name = get_type_name_for_schema_ref(schema, AsReference::False)?;
-            let field_name = ident(&type_name.to_string().to_snake_case());
+            let field_name = ident(&type_name.to_string().to_snake_case()).context(IdentError {
+                file: file!(),
+                line: line!(),
+            })?;
             props.extend(quote! {
                 #[serde(flatten)]
                 pub #field_name: #type_name,
@@ -221,7 +252,10 @@ impl CodeGen {
             .resolve_schema_map(doc_file, &schema.schema.properties)
             .context(SpecError)?;
         for (property_name, property) in &properties {
-            let nm = ident(&property_name.to_snake_case());
+            let nm = ident(&property_name.to_snake_case()).context(IdentError {
+                file: file!(),
+                line: line!(),
+            })?;
             let (mut field_tp_name, field_tp) = self.create_struct_field_type(doc_file, &ns, property_name, property)?;
             let is_required = required.contains(property_name.as_str());
             let is_vec = is_vec(&field_tp_name);
@@ -288,15 +322,21 @@ impl CodeGen {
     ) -> Result<(TokenStream, Vec<TokenStream>)> {
         match &property.ref_key {
             Some(ref_key) => {
-                let tp = ident(&ref_key.name.to_camel_case());
+                let tp = ident(&ref_key.name.to_camel_case()).context(IdentError {
+                    file: file!(),
+                    line: line!(),
+                })?;
                 Ok((tp, Vec::new()))
             }
             None => {
                 if is_local_enum(property) {
-                    let (tp_name, tp) = create_enum(namespace, property_name, property);
+                    let (tp_name, tp) = create_enum(namespace, property_name, property)?;
                     Ok((tp_name, vec![tp]))
                 } else if is_local_struct(property) {
-                    let id = ident(&property_name.to_camel_case());
+                    let id = ident(&property_name.to_camel_case()).context(IdentError {
+                        file: file!(),
+                        line: line!(),
+                    })?;
                     let tp_name = quote! {#namespace::#id};
                     let tps = self.create_struct(doc_file, property_name, property)?;
                     // println!("creating local struct {:?} {}", tp_name, tps.len());
@@ -327,65 +367,6 @@ pub fn create_generated_by_header() -> TokenStream {
     quote! { #![doc = #comment] }
 }
 
-fn is_keyword(word: &str) -> bool {
-    matches!(
-        word,
-        // https://doc.rust-lang.org/grammar.html#keywords
-        "abstract"
-            | "alignof"
-            | "as"
-            | "become"
-            | "box"
-            | "break"
-            | "const"
-            | "continue"
-            | "crate"
-            | "do"
-            | "else"
-            | "enum"
-            | "extern"
-            | "false"
-            | "final"
-            | "fn"
-            | "for"
-            | "if"
-            | "impl"
-            | "in"
-            | "let"
-            | "loop"
-            | "macro"
-            | "match"
-            | "mod"
-            | "move"
-            | "mut"
-            | "offsetof"
-            | "override"
-            | "priv"
-            | "proc"
-            | "pub"
-            | "pure"
-            | "ref"
-            | "return"
-            | "Self"
-            | "self"
-            | "sizeof"
-            | "static"
-            | "struct"
-            | "super"
-            | "trait"
-            | "true"
-            | "type"
-            | "typeof"
-            | "unsafe"
-            | "unsized"
-            | "use"
-            | "virtual"
-            | "where"
-            | "while"
-            | "yield"
-    )
-}
-
 fn is_local_enum(property: &ResolvedSchema) -> bool {
     property.schema.common.enum_.len() > 0
 }
@@ -394,13 +375,24 @@ fn is_local_struct(property: &ResolvedSchema) -> bool {
     property.schema.properties.len() > 0
 }
 
-fn create_enum(namespace: &TokenStream, property_name: &str, property: &ResolvedSchema) -> (TokenStream, TokenStream) {
-    let schema_type = property.schema.common.type_.as_ref();
+fn create_enum(namespace: &TokenStream, property_name: &str, property: &ResolvedSchema) -> Result<(TokenStream, TokenStream)> {
     let enum_values = enum_values_as_strings(&property.schema.common.enum_);
-    let id = ident(&property_name.to_camel_case());
+    let id = ident(&property_name.to_camel_case()).context(IdentError {
+        file: file!(),
+        line: line!(),
+    })?;
     let mut values = TokenStream::new();
-    enum_values.iter().for_each(|name| {
-        let nm = ident(&name.to_camel_case());
+    for name in enum_values {
+        let nm = name
+            .to_camel_case_ident()
+            .context(IdentError {
+                file: file!(),
+                line: line!(),
+            })
+            .context(CreateEnumIdentError {
+                property_name: property_name.to_owned(),
+                enum_value: name.to_owned(),
+            })?;
         let rename = if &nm.to_string() == name {
             quote! {}
         } else {
@@ -411,8 +403,11 @@ fn create_enum(namespace: &TokenStream, property_name: &str, property: &Resolved
             #nm,
         };
         values.extend(value);
-    });
-    let nm = ident(&property_name.to_camel_case());
+    }
+    let nm = ident(&property_name.to_camel_case()).context(IdentError {
+        file: file!(),
+        line: line!(),
+    })?;
     let tp = quote! {
         #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
         pub enum #nm {
@@ -420,7 +415,7 @@ fn create_enum(namespace: &TokenStream, property_name: &str, property: &Resolved
         }
     };
     let tp_name = quote! {#namespace::#id};
-    (tp_name, tp)
+    Ok((tp_name, tp))
 }
 
 /// Wraps a type in an Option if is not required.
@@ -430,21 +425,6 @@ fn require(is_required: bool, tp: TokenStream) -> TokenStream {
     } else {
         quote! { Option<#tp> }
     }
-}
-
-pub fn ident(text: &str) -> TokenStream {
-    let text = text.replace(".", "_");
-    // prefix with underscore if starts with invalid character
-    let text = match text.chars().next().unwrap() {
-        '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0' => format!("_{}", text),
-        _ => text.to_owned(),
-    };
-    let idt = if is_keyword(&text) {
-        format_ident!("{}_", text)
-    } else {
-        format_ident!("{}", text)
-    };
-    idt.into_token_stream()
 }
 
 fn enum_values_as_strings(values: &Vec<Value>) -> Vec<&str> {
@@ -457,17 +437,10 @@ fn enum_values_as_strings(values: &Vec<Value>) -> Vec<&str> {
         .collect()
 }
 
-/// example: pub type Pets = Vec<Pet>;
-fn trim_ref(path: &str) -> String {
-    let pos = path.rfind('/').map_or(0, |i| i + 1);
-    path[pos..].to_string()
-}
-
 fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     let is_required = param.required.unwrap_or(false);
     let is_array = is_array(&param.common);
-    let format = param.common.format.as_deref();
-    let tp = if let Some(param_type) = &param.common.type_ {
+    let tp = if let Some(_param_type) = &param.common.type_ {
         get_type_name_for_schema(&param.common, AsReference::True)?
     } else if let Some(schema) = &param.schema {
         get_type_name_for_schema_ref(schema, AsReference::True)?
@@ -478,8 +451,11 @@ fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     Ok(require(is_required || is_array, tp))
 }
 
-fn get_param_name(param: &Parameter) -> TokenStream {
-    ident(&param.name.to_snake_case())
+fn get_param_name(param: &Parameter) -> Result<TokenStream> {
+    ident(&param.name.to_snake_case()).context(IdentError {
+        file: file!(),
+        line: line!(),
+    })
 }
 
 fn parse_params(param_re: &Regex, path: &str) -> Vec<String> {
@@ -491,10 +467,10 @@ fn format_path(param_re: &Regex, path: &str) -> String {
     param_re.replace_all(path, "{}").to_string()
 }
 
-fn create_function_params(cg: &CodeGen, doc_file: &Path, parameters: &Vec<Parameter>) -> Result<TokenStream> {
+fn create_function_params(_cg: &CodeGen, _doc_file: &Path, parameters: &Vec<Parameter>) -> Result<TokenStream> {
     let mut params: Vec<TokenStream> = Vec::new();
     for param in parameters {
-        let name = get_param_name(param);
+        let name = get_param_name(param)?;
         let tp = get_param_type(param)?;
         params.push(quote! { #name: #tp });
     }
@@ -557,7 +533,10 @@ fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>, as_ref: AsReferenc
         ReferenceOr::Reference { reference, .. } => {
             let rf = Reference::parse(&reference);
             let name = &rf.name.context(NoNameForRef)?;
-            let idt = ident(&name.to_camel_case());
+            let idt = ident(&name.to_camel_case()).context(IdentError {
+                file: file!(),
+                line: line!(),
+            })?;
             match as_ref {
                 AsReference::True => Ok(quote! { &#idt }),
                 AsReference::False => Ok(quote! { #idt }),
@@ -579,16 +558,28 @@ fn create_function(
     cg: &CodeGen,
     doc_file: &Path,
     path: &str,
-    item: &PathItem,
+    _item: &PathItem,
     operation_verb: &OperationVerb,
     param_re: &Regex,
     function_name: &str,
 ) -> Result<TokenStream> {
-    let fname = ident(function_name);
+    let fname = ident(function_name).context(IdentError {
+        file: file!(),
+        line: line!(),
+    })?;
 
     let params = parse_params(param_re, path);
     // println!("path params {:#?}", params);
-    let params: Vec<_> = params.iter().map(|s| ident(&s.to_snake_case())).collect();
+    let params: Result<Vec<_>> = params
+        .iter()
+        .map(|s| {
+            Ok(ident(&s.to_snake_case()).context(IdentError {
+                file: file!(),
+                line: line!(),
+            })?)
+        })
+        .collect();
+    let params = params?;
     let uri_str_args = quote! { #(#params),* };
 
     let fpath = format!("{{}}{}", &format_path(param_re, path));
@@ -634,7 +625,7 @@ fn create_function(
 
     // api-version param
     if has_param_api_version {
-        if let Some(api_version) = cg.api_version() {
+        if let Some(_api_version) = cg.api_version() {
             ts_request_builder.extend(quote! {
                 req_builder = req_builder.query(&[("api-version", &operation_config.api_version)]);
             });
@@ -644,7 +635,7 @@ fn create_function(
     // params
     for param in &parameters {
         let param_name = &param.name;
-        let param_name_var = get_param_name(&param);
+        let param_name_var = get_param_name(&param)?;
         let required = param.required.unwrap_or(false);
         match param.in_ {
             ParameterType::Path => {} // handled above
@@ -744,7 +735,10 @@ fn create_function(
                 Some(tp) => quote! { (#tp) },
                 None => quote! {},
             };
-            let enum_type_name = ident(&get_response_type_name(status_code));
+            let enum_type_name = ident(&get_response_type_name(status_code)).context(IdentError {
+                file: file!(),
+                line: line!(),
+            })?;
             success_responses_ts.extend(quote! { #enum_type_name#tp, })
         }
         response_enum.extend(quote! {
@@ -766,7 +760,10 @@ fn create_function(
         if response_type == "DefaultResponse" {
             error_responses_ts.extend(quote! { DefaultResponse { status_code: StatusCode, #tp }, });
         } else {
-            let response_type = ident(response_type);
+            let response_type = ident(response_type).context(IdentError {
+                file: file!(),
+                line: line!(),
+            })?;
             error_responses_ts.extend(quote! { #response_type { #tp }, });
         }
     }
@@ -779,8 +776,14 @@ fn create_function(
         match status_code {
             autorust_openapi::StatusCode::Code(_) => {
                 let tp = create_response_type(rsp)?;
-                let status_code_name = ident(&get_status_code_name(status_code));
-                let response_type_name = ident(&get_response_type_name(status_code));
+                let status_code_name = ident(&get_status_code_name(status_code)).context(IdentError {
+                    file: file!(),
+                    line: line!(),
+                })?;
+                let response_type_name = ident(&get_response_type_name(status_code)).context(IdentError {
+                    file: file!(),
+                    line: line!(),
+                })?;
                 if is_single_response {
                     match tp {
                         Some(tp) => {
@@ -828,8 +831,14 @@ fn create_function(
         match status_code {
             autorust_openapi::StatusCode::Code(_) => {
                 let tp = create_response_type(rsp)?;
-                let status_code_name = ident(&get_status_code_name(status_code));
-                let response_type_name = ident(&get_response_type_name(status_code));
+                let status_code_name = ident(&get_status_code_name(status_code)).context(IdentError {
+                    file: file!(),
+                    line: line!(),
+                })?;
+                let response_type_name = ident(&get_response_type_name(status_code)).context(IdentError {
+                    file: file!(),
+                    line: line!(),
+                })?;
                 match tp {
                     Some(tp) => {
                         match_status.extend(quote! {
@@ -859,7 +868,6 @@ fn create_function(
                 autorust_openapi::StatusCode::Code(_) => {}
                 autorust_openapi::StatusCode::Default => {
                     let tp = create_response_type(rsp)?;
-                    let response_type_name = ident(&get_response_type_name(status_code));
                     match tp {
                         Some(tp) => {
                             match_status.extend(quote! {
@@ -929,24 +937,5 @@ pub fn create_mod(api_version: &str) -> TokenStream {
         pub mod models;
         pub mod operations;
         pub const API_VERSION: &str = #api_version;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_ident_odata_next_link() {
-        let idt = "odata.nextLink".to_snake_case();
-        assert_eq!(idt, "odata.next_link");
-        let idt = ident(&idt);
-        assert_eq!(idt.to_string(), "odata_next_link");
-    }
-
-    #[test]
-    fn test_ident_three_dot_two() {
-        let idt = ident("3.2");
-        assert_eq!(idt.to_string(), "_3_2");
     }
 }

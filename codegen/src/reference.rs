@@ -74,4 +74,17 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn can_parse_types() -> Result<()> {
+        assert_eq!(
+            Reference::parse("./types.json#/definitions/Resource"),
+            Reference {
+                file: Some("./types.json".to_owned()),
+                path: vec!["definitions".to_owned()],
+                name: Some("Resource".to_owned()),
+            }
+        );
+        Ok(())
+    }
 }
