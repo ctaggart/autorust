@@ -12,7 +12,7 @@ const LINKS_SPEC: &str = "../../azure-rest-api-specs/specification/common-types/
 #[test]
 fn test_redis_ref_files() -> Result<()> {
     let api = &spec::openapi::parse(REDIS_SPEC)?;
-    let files = spec::openapi::get_ref_files(api);
+    let files = spec::openapi::get_reference_file_paths(api);
     println!("{:#?}", files);
     assert_eq!(2, files.len());
     assert!(files.contains("../../../../../common-types/resource-management/v2/types.json"));
@@ -22,9 +22,9 @@ fn test_redis_ref_files() -> Result<()> {
 #[test]
 fn test_redis_read_spec() -> Result<()> {
     let spec = &Spec::read_files(&[REDIS_SPEC])?;
-    println!("{:#?}", spec.docs.keys());
-    assert_eq!(3, spec.docs.len());
-    assert!(spec.docs.contains_key(std::path::Path::new(
+    println!("{:#?}", spec.docs().keys());
+    assert_eq!(3, spec.docs().len());
+    assert!(spec.docs().contains_key(std::path::Path::new(
         "../../azure-rest-api-specs/specification/common-types/resource-management/v2/types.json"
     )));
     Ok(())
@@ -33,7 +33,7 @@ fn test_redis_read_spec() -> Result<()> {
 #[test]
 fn test_links_ref_files() -> Result<()> {
     let api = &spec::openapi::parse(LINKS_SPEC)?;
-    let files = spec::openapi::get_ref_files(api);
+    let files = spec::openapi::get_reference_file_paths(api);
     println!("{:#?}", files);
     assert_eq!(1, files.len());
     assert!(files.contains("./types.json"));
@@ -43,7 +43,7 @@ fn test_links_ref_files() -> Result<()> {
 #[test]
 fn test_links_refs_count() -> Result<()> {
     let api = &spec::openapi::parse(LINKS_SPEC)?;
-    let refs = spec::get_refs(api);
+    let refs = spec::openapi::get_references(api);
     assert_eq!(10, refs.len());
     Ok(())
 }

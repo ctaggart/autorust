@@ -14,42 +14,11 @@ use quote::quote;
 use regex::Regex;
 use serde_json::Value;
 use snafu::{OptionExt, ResultExt, Snafu};
-use spec::{get_api_schema_refs, get_schema_schema_refs, RefKey};
+use spec::{get_schema_schema_references, openapi, RefKey};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
 };
-
-pub type Result<T, E = Error> = std::result::Result<T, E>;
-#[derive(Debug, Snafu)]
-pub enum Error {
-    SpecError {
-        source: spec::Error,
-    },
-    ArrayExpectedToHaveItems,
-    NoNameForRef,
-    #[snafu(display("IdentError at {}:{} {} ", file, line, source))]
-    IdentError {
-        // #[snafu(source(from(Error, Box::new)))]
-        source: crate::identifier::Error,
-        file: &'static str,
-        line: u32,
-    },
-    #[snafu(display("CreateEnumIdentError {} {} {}", property_name, enum_value, source))]
-    CreateEnumIdentError {
-        #[snafu(source(from(Error, Box::new)))]
-        source: Box<Error>,
-        property_name: String,
-        enum_value: String,
-    },
-}
-
-/// Whether or not to pass a type is a reference.
-#[derive(Copy, Clone)]
-pub enum AsReference {
-    True,
-    False,
-}
 
 /// code generation context
 pub struct CodeGen {
@@ -86,33 +55,29 @@ impl CodeGen {
         let mut all_schemas: IndexMap<RefKey, ResolvedSchema> = IndexMap::new();
 
         // all definitions from input_files
-        for (doc_file, doc) in &self.spec.docs {
-            if self.spec.is_input_file(doc_file) {
-                let schemas = self.spec.resolve_schema_map(doc_file, &doc.definitions).context(SpecError)?;
-                for (name, schema) in schemas {
-                    all_schemas.insert(
-                        RefKey {
-                            file: doc_file.to_owned(),
-                            name,
-                        },
-                        schema,
-                    );
-                }
+        for (doc_file, doc) in self.spec.input_docs() {
+            let schemas = self.spec.resolve_schema_map(doc_file, &doc.definitions).context(SpecError)?;
+            for (name, schema) in schemas {
+                all_schemas.insert(
+                    RefKey {
+                        file_path: doc_file.to_owned(),
+                        name,
+                    },
+                    schema,
+                );
             }
         }
 
         // any referenced schemas from other files
-        for (doc_file, doc) in &self.spec.docs {
-            if self.spec.is_input_file(doc_file) {
-                for reference in get_api_schema_refs(doc) {
-                    self.add_schema_refs(&mut all_schemas, doc_file, reference)?;
-                }
+        for (doc_file, doc) in self.spec.input_docs() {
+            for reference in openapi::get_api_schema_references(doc) {
+                self.add_schema_refs(&mut all_schemas, doc_file, reference)?;
             }
         }
 
         let mut schema_names = IndexMap::new();
         for (ref_key, schema) in &all_schemas {
-            let doc_file = &ref_key.file;
+            let doc_file = &ref_key.file_path;
             let schema_name = &ref_key.name;
             if let Some(_first_doc_file) = schema_names.insert(schema_name, doc_file) {
                 // eprintln!(
@@ -149,12 +114,10 @@ impl CodeGen {
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
         let mut modules: IndexMap<Option<String>, TokenStream> = IndexMap::new();
-        for (doc_file, doc) in &self.spec.docs {
+        for (doc_file, doc) in self.spec.docs() {
             let paths = self.spec.resolve_path_map(doc_file, &doc.paths).context(SpecError)?;
             for (path, item) in &paths {
-                // println!("{}", path);
                 for op in spec::path_item_operations(item) {
-                    // println!("{:?}", op.operation_id);
                     let (module_name, function_name) = op.function_name(path);
                     let function = create_function(self, doc_file, path, item, &op, &param_re, &function_name)?;
                     if modules.contains_key(&module_name) {}
@@ -200,11 +163,11 @@ impl CodeGen {
         let schema = self.spec.resolve_schema_ref(doc_file, schema_ref).context(SpecError)?;
         if let Some(ref_key) = schema.ref_key.clone() {
             if !schemas.contains_key(&ref_key) {
-                if !self.spec.is_input_file(&ref_key.file) {
-                    let refs = get_schema_schema_refs(&schema.schema);
+                if !self.spec.is_input_file(&ref_key.file_path) {
+                    let refs = get_schema_schema_references(&schema.schema);
                     schemas.insert(ref_key.clone(), schema);
                     for reference in refs {
-                        self.add_schema_refs(schemas, &ref_key.file, reference)?;
+                        self.add_schema_refs(schemas, &ref_key.file_path, reference)?;
                     }
                 }
             }
@@ -349,6 +312,37 @@ impl CodeGen {
             }
         }
     }
+}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;
+#[derive(Debug, Snafu)]
+pub enum Error {
+    SpecError {
+        source: spec::Error,
+    },
+    ArrayExpectedToHaveItems,
+    NoNameForRef,
+    #[snafu(display("IdentError at {}:{} {} ", file, line, source))]
+    IdentError {
+        // #[snafu(source(from(Error, Box::new)))]
+        source: crate::identifier::Error,
+        file: &'static str,
+        line: u32,
+    },
+    #[snafu(display("CreateEnumIdentError {} {} {}", property_name, enum_value, source))]
+    CreateEnumIdentError {
+        #[snafu(source(from(Error, Box::new)))]
+        source: Box<Error>,
+        property_name: String,
+        enum_value: String,
+    },
+}
+
+/// Whether or not to pass a type is a reference.
+#[derive(Copy, Clone)]
+pub enum AsReference {
+    True,
+    False,
 }
 
 fn is_vec(ts: &TokenStream) -> bool {
