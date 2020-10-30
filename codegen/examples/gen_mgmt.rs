@@ -27,7 +27,7 @@ const ONLY_SERVICES: &[&str] = &[
 
 const SKIP_SERVICES: &[&str] = &[
     "apimanagement",                // missing properties, all preview apis
-    "automation",                   // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
+    "automation",                   // 'not yet implemented: Handle DataType::File
     "cosmos-db",                    // get_gremlin_graph_throughput defined twice
     "cost-management",              // use of undeclared crate or module `definition`
     "databox",                      // TODO #73 recursive types
@@ -38,30 +38,28 @@ const SKIP_SERVICES: &[&str] = &[
     "dnc",           // conflicting implementation for `v2020_08_08_preview::models::ControllerDetails`
     "hardwaresecuritymodules", // recursive without indirection on Error
     "healthcareapis", // Error: "schema not found ../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json Resource"
-    "hybridcompute",  // use of undeclared crate or module `status`
     "logic",          // TODO #73 recursive types
     "machinelearning", // missing params
-    "managedservices", // registration_definition
     "mediaservices",  // Error: Error("invalid unicode code point", line: 1380, column: 289)
-    "migrateprojects", // recursive type has infinite size
+    "migrateprojects", // TODO #73 recursive types
     "mixedreality",   // &AccountKeyRegenerateRequest not found in scope
     "netapp",         // codegen wrong, missing operation params in function
     "network",        // TODO #73 recursive types
     "powerplatform", // Error: "parameter not found ../azure-rest-api-specs/specification/powerplatform/resource-manager/Microsoft.PowerPlatform/common/v1/definitions.json ResourceGroupNameParameter"
     "recoveryservicessiterecovery", // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
-    "redis",         // map_type
-    "search",        // private_link_service_connection_state::Status
+    "redis", // SchemaNotFound { ref_key: RefKey { file_path: "../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json", name: "Resource"
+    "redisenterprise", // SchemaNotFound { ref_key: RefKey { file_path: "../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json", name: "Resource"
     "service-map", // thread 'main' panicked at '"Ref:machine" is not a valid Ident', /Users/cameron/.cargo/registry/src/github.com-1ecc6299db9ec823/proc-macro2-1.0.24/src/fallback.rs:693:9
     "servicefabric", // {}/providers/Microsoft.ServiceFabric/operations list defined twice
-    "storagecache", // use of undeclared crate or module `properties`
     "web",         // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 1950, column: 5)
 ];
 
 const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("azureactivedirectory", "package-preview-2020-07"),
     ("resources", "package-policy-2020-03"),
+    ("resources", "package-policy-2020-09"), // SchemaNotFound { ref_key: RefKey { file_path: "../azure-rest-api-specs/specification/resources/resource-manager/Microsoft.Authorization/stable/2020-09-01/dataPolicyManifests.json", name: "CloudError"
     ("recoveryservicesbackup", "package-2020-07"), // duplicate fn get_operation_status
-    ("network", "package-2017-03-30-only"),        // SchemaNotFound 2017-09-01/network.json SubResource
+    ("network", "package-2017-03-30-only"),  // SchemaNotFound 2017-09-01/network.json SubResource
 ];
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

@@ -4,23 +4,22 @@ pub mod config_parser;
 pub mod identifier;
 pub mod lib_rs;
 pub mod path;
-mod reference;
 pub mod spec;
 mod status_codes;
+
 pub use self::{
     codegen::{create_mod, CodeGen},
-    reference::Reference,
     spec::{OperationVerb, ResolvedSchema, Spec},
 };
+
 use proc_macro2::TokenStream;
 use snafu::{ResultExt, Snafu};
+
 use std::{
     fs::{self, File},
     io::prelude::*,
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
-#[macro_use]
-extern crate lazy_static;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -87,8 +86,8 @@ pub fn run(config: Config) -> Result<()> {
     Ok(())
 }
 
-pub fn write_file<P: Into<PathBuf>>(file: P, tokens: &TokenStream) -> Result<()> {
-    let file: PathBuf = file.into();
+fn write_file<P: AsRef<Path>>(file: P, tokens: &TokenStream) -> Result<()> {
+    let file = file.as_ref();
     println!("writing file {}", &file.display());
     let code = tokens.to_string();
     let mut buffer = File::create(&file).context(CreateFileError { file: file.clone() })?;

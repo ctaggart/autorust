@@ -43,8 +43,9 @@ tokio = {{ version = "0.2", features = ["macros"] }}
     )
     .context(IoError)?;
 
-    let dft = get_default_feature(feature_mod_names);
-    file.write_all(format!("default = [\"{}\"]\n", dft).as_bytes()).context(IoError)?;
+    let default = get_default_feature(feature_mod_names);
+    file.write_all(format!("default = [\"{}\"]\n", default).as_bytes())
+        .context(IoError)?;
 
     for (feature_name, _mod_name) in feature_mod_names {
         file.write_all(format!("\"{}\" = []\n", feature_name).as_bytes()).context(IoError)?;
@@ -53,12 +54,12 @@ tokio = {{ version = "0.2", features = ["macros"] }}
 }
 
 fn get_default_feature(feature_mod_names: &Vec<(String, String)>) -> String {
-    let dft = feature_mod_names
+    let default = feature_mod_names
         .iter()
         .map(|(feature, _)| feature)
         .find(|feature| !feature.contains("preview"));
-    match dft {
-        Some(dft) => dft.clone(),
+    match default {
+        Some(default) => default.clone(),
         None => feature_mod_names[0].0.clone(),
     }
 }

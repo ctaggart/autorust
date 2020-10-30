@@ -2,7 +2,7 @@ use path_abs::PathMut;
 use snafu::{ResultExt, Snafu};
 use std::path::{Path, PathBuf};
 
-pub type Result<T, E = Error> = std::result::Result<T, E>;
+type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Snafu)]
 pub enum Error {
     PopUpPath { source: path_abs::Error },

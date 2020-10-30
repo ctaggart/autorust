@@ -193,7 +193,7 @@ const STATUS_CODES: &[(u16, &str)] = &[
     (511, "NETWORK_AUTHENTICATION_REQUIRED"),
 ];
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref STATUS_CODE_MAP: HashMap<u16, &'static str> = STATUS_CODES.iter().cloned().collect();
 }
 
