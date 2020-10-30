@@ -1,5 +1,5 @@
-#![allow(unused_variables, dead_code)]
 use crate::{
+    identifier::{ident, CamelCaseIdent},
     spec,
     status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses, has_default_response},
     Config, OperationVerb, Reference, ResolvedSchema, Spec,
@@ -8,7 +8,7 @@ use autorust_openapi::{CollectionFormat, DataType, Parameter, ParameterType, Pat
 use heck::{CamelCase, SnakeCase};
 use indexmap::IndexMap;
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
+use quote::quote;
 use regex::Regex;
 use serde_json::Value;
 use snafu::{OptionExt, ResultExt, Snafu};
@@ -26,16 +26,10 @@ pub enum Error {
     },
     ArrayExpectedToHaveItems,
     NoNameForRef,
-    EmtpyIdentError,
-    #[snafu(display("ParseIdentError {} {}", text, source))]
-    ParseIdentError {
-        source: syn::Error,
-        text: String,
-    },
     #[snafu(display("IdentError at {}:{} {} ", file, line, source))]
     IdentError {
-        #[snafu(source(from(Error, Box::new)))]
-        source: Box<Error>,
+        // #[snafu(source(from(Error, Box::new)))]
+        source: crate::identifier::Error,
         file: &'static str,
         line: u32,
     },
@@ -46,7 +40,6 @@ pub enum Error {
         property_name: String,
         enum_value: String,
     },
-    // CreateEnumIdentError{ property_name: property_name.to_owned(), enum_value: name.to_owned() }
 }
 
 /// Whether or not to pass a type is a reference.
@@ -119,7 +112,7 @@ impl CodeGen {
         for (ref_key, schema) in &all_schemas {
             let doc_file = &ref_key.file;
             let schema_name = &ref_key.name;
-            if let Some(first_doc_file) = schema_names.insert(schema_name, doc_file) {
+            if let Some(_first_doc_file) = schema_names.insert(schema_name, doc_file) {
                 // eprintln!(
                 //     "WARN schema {} already created from {:?}, duplicate from {:?}",
                 //     schema_name, first_doc_file, doc_file
@@ -217,7 +210,7 @@ impl CodeGen {
         Ok(())
     }
 
-    fn create_vec_alias(&self, doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
+    fn create_vec_alias(&self, _doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
         let items = get_schema_array_items(&schema.schema.common)?;
         let typ = ident(&alias_name.to_camel_case()).context(IdentError {
             file: file!(),
@@ -374,65 +367,6 @@ pub fn create_generated_by_header() -> TokenStream {
     quote! { #![doc = #comment] }
 }
 
-fn is_keyword(word: &str) -> bool {
-    matches!(
-        word,
-        // https://doc.rust-lang.org/grammar.html#keywords
-        "abstract"
-            | "alignof"
-            | "as"
-            | "become"
-            | "box"
-            | "break"
-            | "const"
-            | "continue"
-            | "crate"
-            | "do"
-            | "else"
-            | "enum"
-            | "extern"
-            | "false"
-            | "final"
-            | "fn"
-            | "for"
-            | "if"
-            | "impl"
-            | "in"
-            | "let"
-            | "loop"
-            | "macro"
-            | "match"
-            | "mod"
-            | "move"
-            | "mut"
-            | "offsetof"
-            | "override"
-            | "priv"
-            | "proc"
-            | "pub"
-            | "pure"
-            | "ref"
-            | "return"
-            | "Self"
-            | "self"
-            | "sizeof"
-            | "static"
-            | "struct"
-            | "super"
-            | "trait"
-            | "true"
-            | "type"
-            | "typeof"
-            | "unsafe"
-            | "unsized"
-            | "use"
-            | "virtual"
-            | "where"
-            | "while"
-            | "yield"
-    )
-}
-
 fn is_local_enum(property: &ResolvedSchema) -> bool {
     property.schema.common.enum_.len() > 0
 }
@@ -442,7 +376,6 @@ fn is_local_struct(property: &ResolvedSchema) -> bool {
 }
 
 fn create_enum(namespace: &TokenStream, property_name: &str, property: &ResolvedSchema) -> Result<(TokenStream, TokenStream)> {
-    let schema_type = property.schema.common.type_.as_ref();
     let enum_values = enum_values_as_strings(&property.schema.common.enum_);
     let id = ident(&property_name.to_camel_case()).context(IdentError {
         file: file!(),
@@ -494,49 +427,6 @@ fn require(is_required: bool, tp: TokenStream) -> TokenStream {
     }
 }
 
-pub fn ident(text: &str) -> Result<TokenStream> {
-    let mut txt = text.replace(".", "_");
-    txt = txt.replace(",", "_");
-    txt = txt.replace("-", "_");
-    txt = txt.replace("/", "_");
-    txt = txt.replace(" ", "");
-    // prefix with underscore if starts with invalid character
-    txt = match txt.chars().next().context(EmtpyIdentError)? {
-        '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0' => format!("_{}", txt),
-        _ => txt.to_owned(),
-    };
-    if is_keyword(&txt) {
-        txt = format!("{}_", txt);
-    };
-    // let idt = syn::parse_str::<syn::Ident>(&txt).context(ParseIdentError{ text: text.to_owned() })?;
-    let idt = match syn::parse_str::<syn::Ident>(&txt) {
-        Ok(idt) => idt,
-        Err(_) => {
-            // replace certain unicode charaters with their unicode names
-            txt = txt.replace("*", "Asterisk");
-            syn::parse_str::<syn::Ident>(&txt).context(ParseIdentError { text: text.to_owned() })?
-        }
-    };
-    Ok(idt.into_token_stream())
-}
-
-pub trait CamelCaseIdent: ToOwned {
-    fn to_camel_case_ident(&self) -> Result<TokenStream>;
-}
-
-impl CamelCaseIdent for str {
-    fn to_camel_case_ident(&self) -> Result<TokenStream> {
-        let mut txt = ident(self)?.to_string().to_camel_case();
-        // prefix with underscore if starts with invalid character
-        txt = match txt.chars().next().context(EmtpyIdentError)? {
-            '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0' => format!("_{}", txt),
-            _ => txt.to_owned(),
-        };
-        let idt = syn::parse_str::<syn::Ident>(&txt).context(ParseIdentError { text: self.to_owned() })?;
-        Ok(idt.into_token_stream())
-    }
-}
-
 fn enum_values_as_strings(values: &Vec<Value>) -> Vec<&str> {
     values
         .iter()
@@ -547,17 +437,10 @@ fn enum_values_as_strings(values: &Vec<Value>) -> Vec<&str> {
         .collect()
 }
 
-/// example: pub type Pets = Vec<Pet>;
-fn trim_ref(path: &str) -> String {
-    let pos = path.rfind('/').map_or(0, |i| i + 1);
-    path[pos..].to_string()
-}
-
 fn get_param_type(param: &Parameter) -> Result<TokenStream> {
     let is_required = param.required.unwrap_or(false);
     let is_array = is_array(&param.common);
-    let format = param.common.format.as_deref();
-    let tp = if let Some(param_type) = &param.common.type_ {
+    let tp = if let Some(_param_type) = &param.common.type_ {
         get_type_name_for_schema(&param.common, AsReference::True)?
     } else if let Some(schema) = &param.schema {
         get_type_name_for_schema_ref(schema, AsReference::True)?
@@ -584,7 +467,7 @@ fn format_path(param_re: &Regex, path: &str) -> String {
     param_re.replace_all(path, "{}").to_string()
 }
 
-fn create_function_params(cg: &CodeGen, doc_file: &Path, parameters: &Vec<Parameter>) -> Result<TokenStream> {
+fn create_function_params(_cg: &CodeGen, _doc_file: &Path, parameters: &Vec<Parameter>) -> Result<TokenStream> {
     let mut params: Vec<TokenStream> = Vec::new();
     for param in parameters {
         let name = get_param_name(param)?;
@@ -675,7 +558,7 @@ fn create_function(
     cg: &CodeGen,
     doc_file: &Path,
     path: &str,
-    item: &PathItem,
+    _item: &PathItem,
     operation_verb: &OperationVerb,
     param_re: &Regex,
     function_name: &str,
@@ -742,7 +625,7 @@ fn create_function(
 
     // api-version param
     if has_param_api_version {
-        if let Some(api_version) = cg.api_version() {
+        if let Some(_api_version) = cg.api_version() {
             ts_request_builder.extend(quote! {
                 req_builder = req_builder.query(&[("api-version", &operation_config.api_version)]);
             });
@@ -960,7 +843,7 @@ fn create_function(
                     Some(tp) => {
                         match_status.extend(quote! {
                             StatusCode::#status_code_name => {
-                                let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError).context(IdentError{file: file!(), line: line!()})?;
+                                let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
                                 let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
                                 #fname::#response_type_name{value: rsp_value}.fail()
                             }
@@ -985,7 +868,6 @@ fn create_function(
                 autorust_openapi::StatusCode::Code(_) => {}
                 autorust_openapi::StatusCode::Default => {
                     let tp = create_response_type(rsp)?;
-                    let response_type_name = ident(&get_response_type_name(status_code));
                     match tp {
                         Some(tp) => {
                             match_status.extend(quote! {
@@ -1055,64 +937,5 @@ pub fn create_mod(api_version: &str) -> TokenStream {
         pub mod models;
         pub mod operations;
         pub const API_VERSION: &str = #api_version;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_ident_odata_next_link() -> Result<()> {
-        let idt = "odata.nextLink".to_snake_case();
-        assert_eq!(idt, "odata.next_link");
-        let idt = ident(&idt)?;
-        assert_eq!(idt.to_string(), "odata_next_link");
-        Ok(())
-    }
-
-    #[test]
-    fn test_ident_three_dot_two() -> Result<()> {
-        let idt = ident("3.2")?;
-        assert_eq!(idt.to_string(), "_3_2");
-        Ok(())
-    }
-
-    #[test]
-    fn test_ident_asterisk() -> Result<()> {
-        assert_eq!(ident("*")?.to_string(), "Asterisk");
-        assert_eq!("*".to_camel_case(), "");
-        assert_eq!("*".to_camel_case_ident()?.to_string(), "Asterisk");
-        Ok(())
-    }
-
-    #[test]
-    fn test_ident_system_assigned_user_assigned() -> Result<()> {
-        assert_eq!(
-            "SystemAssigned, UserAssigned".to_camel_case_ident()?.to_string(),
-            "SystemAssignedUserAssigned"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn test_ident_gcm_aes_128() -> Result<()> {
-        assert_eq!("gcm-aes-128".to_camel_case_ident()?.to_string(), "GcmAes128");
-        Ok(())
-    }
-
-    #[test]
-    fn test_ident_5() -> Result<()> {
-        assert_eq!("5".to_camel_case_ident()?.to_string(), "_5");
-        Ok(())
-    }
-
-    #[test]
-    fn test_ident_app_configuration() -> Result<()> {
-        assert_eq!(
-            "Microsoft.AppConfiguration/configurationStores".to_camel_case_ident()?.to_string(),
-            "MicrosoftAppConfigurationConfigurationStores"
-        );
-        Ok(())
     }
 }

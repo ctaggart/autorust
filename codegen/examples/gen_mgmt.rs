@@ -45,7 +45,7 @@ const SKIP_SERVICES: &[&str] = &[
     "migrateprojects", // recursive type has infinite size
     "mixedreality",   // &AccountKeyRegenerateRequest not found in scope
     "netapp",         // codegen wrong, missing operation params in function
-    "network",        // thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', codegen/src/codegen.rs:419:42
+    "network",        // TODO #73 recursive types
     "powerplatform", // Error: "parameter not found ../azure-rest-api-specs/specification/powerplatform/resource-manager/Microsoft.PowerPlatform/common/v1/definitions.json ResourceGroupNameParameter"
     "recoveryservicessiterecovery", // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
     "redis",         // map_type

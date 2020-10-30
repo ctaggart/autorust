@@ -1,7 +1,4 @@
-use crate::{
-    codegen::{create_generated_by_header, ident},
-    write_file,
-};
+use crate::{codegen::create_generated_by_header, identifier::ident, write_file};
 use proc_macro2::TokenStream;
 use quote::quote;
 use snafu::{ResultExt, Snafu};
@@ -12,7 +9,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Snafu)]
 pub enum Error {
     IdentModNameError {
-        source: crate::codegen::Error,
+        source: crate::identifier::Error,
         feature_name: String,
         mod_name: String,
     },

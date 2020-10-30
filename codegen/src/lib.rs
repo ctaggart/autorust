@@ -1,6 +1,7 @@
 pub mod cargo_toml;
 mod codegen;
 pub mod config_parser;
+pub mod identifier;
 pub mod lib_rs;
 pub mod path;
 mod reference;
