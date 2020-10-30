@@ -324,7 +324,6 @@ pub enum Error {
     NoNameForRef,
     #[snafu(display("IdentError at {}:{} {} ", file, line, source))]
     IdentError {
-        // #[snafu(source(from(Error, Box::new)))]
         source: crate::identifier::Error,
         file: &'static str,
         line: u32,
