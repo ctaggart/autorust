@@ -22,6 +22,7 @@ const SERVICE_NAMES: &[(&str, &str)] = &[
 
 const ONLY_SERVICES: &[&str] = &[
     // "network",
+    // "redis",
 ];
 
 const SKIP_SERVICES: &[&str] = &[
@@ -29,7 +30,7 @@ const SKIP_SERVICES: &[&str] = &[
     "automation",                   // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 90, column: 5)
     "cosmos-db",                    // get_gremlin_graph_throughput defined twice
     "cost-management",              // use of undeclared crate or module `definition`
-    "databox",                      // recursive type has infinite size
+    "databox",                      // TODO #73 recursive types
     "databoxedge",                  // duplicate model pub struct SkuCost {
     "datamigration", // Error: "schema not found ../azure-rest-api-specs/specification/datamigration/resource-manager/Microsoft.DataMigration/preview/2018-07-15-preview/definitions/MigrateSqlServerSqlDbTask.json ValidationStatus"
     "deploymentmanager", // missing params
@@ -38,7 +39,7 @@ const SKIP_SERVICES: &[&str] = &[
     "hardwaresecuritymodules", // recursive without indirection on Error
     "healthcareapis", // Error: "schema not found ../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json Resource"
     "hybridcompute",  // use of undeclared crate or module `status`
-    "logic",          // recursive type has infinite size
+    "logic",          // TODO #73 recursive types
     "machinelearning", // missing params
     "managedservices", // registration_definition
     "mediaservices",  // Error: Error("invalid unicode code point", line: 1380, column: 289)
@@ -66,7 +67,6 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, Snafu)]
-// #[snafu(visibility(pub(crate)))]
 pub enum Error {
     #[snafu(display("file name was not utf-8"))]
     FileNameNotUtf8Error {},
@@ -77,7 +77,6 @@ pub enum Error {
         source: path::Error,
     },
     CodegenError {
-        #[snafu(backtrace)]
         source: autorust_codegen::Error,
     },
     CargoTomlError {
@@ -88,37 +87,7 @@ pub enum Error {
     },
 }
 
-fn main() {
-    match run() {
-        Ok(_) => {}
-        Err(err) => {
-            report(&err);
-        }
-    }
-}
-
-fn report<E: 'static>(err: &E)
-where
-    E: std::error::Error,
-    E: snafu::ErrorCompat,
-    E: Send + Sync,
-{
-    eprintln!("[ERROR] {}", err);
-    if let Some(source) = err.source() {
-        eprintln!();
-        eprintln!("Caused by:");
-        for (i, e) in std::iter::successors(Some(source), |e| e.source()).enumerate() {
-            eprintln!("   {}: {}", i, e);
-        }
-    }
-
-    // if let Some(backtrace) = ErrorCompat::backtrace(err) {
-    //     eprintln!("Backtrace:");
-    //     eprintln!("{}", backtrace);
-    // }
-}
-
-fn run() -> Result<()> {
+fn main() -> Result<()> {
     let paths = fs::read_dir(SPEC_FOLDER).context(IoError)?;
     let mut spec_folders = Vec::new();
     for path in paths {

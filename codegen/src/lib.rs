@@ -25,7 +25,6 @@ extern crate lazy_static;
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, Snafu)]
-// #[snafu(visibility(pub(crate)))]
 pub enum Error {
     #[snafu(display("Could not create output directory {}: {}", directory.display(), source))]
     CreateOutputDirectoryError {
