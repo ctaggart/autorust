@@ -2,7 +2,12 @@
 // These tests require cloning azure-rest-api-specs.
 // git clone git@github.com:Azure/azure-rest-api-specs.git ../azure-rest-api-specs
 
-use autorust_codegen::{spec, Spec};
+use std::path::PathBuf;
+
+use autorust_codegen::{
+    spec::{self, TypedReference},
+    Spec,
+};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -48,24 +53,24 @@ fn test_links_refs_count() -> Result<()> {
     Ok(())
 }
 
-// #[test]
-// fn test_redis_resolve_all_refs() -> Result<()> {
-//     let doc_file = PathBuf::from(REDIS_SPEC);
-//     let spec = &Spec::read_files(&[&doc_file])?;
-//     for (doc_file, doc) in &spec.docs {
-//         let refs = spec::get_refs(doc);
-//         for rs in refs {
-//             match rs {
-//                 RefString::PathItem(_) => {}
-//                 RefString::Example(_) => {}
-//                 RefString::Parameter(reference) => {
-//                     spec.resolve_parameter_ref(&doc_file, Reference::parse(&reference))?;
-//                 }
-//                 RefString::Schema(reference) => {
-//                     spec.resolve_schema_ref(&doc_file, Reference::parse(&reference))?;
-//                 }
-//             }
-//         }
-//     }
-//     Ok(())
-// }
+#[test]
+fn test_redis_resolve_all_refs() -> Result<()> {
+    let doc_file = PathBuf::from(REDIS_SPEC);
+    let spec = &Spec::read_files(&[&doc_file])?;
+    for (doc_file, doc) in spec.docs() {
+        let refs = spec::openapi::get_references(doc);
+        for rs in refs {
+            match rs {
+                TypedReference::PathItem(_) => {}
+                TypedReference::Example(_) => {}
+                TypedReference::Parameter(reference) => {
+                    spec.resolve_parameter_ref(&doc_file, reference)?;
+                }
+                TypedReference::Schema(reference) => {
+                    spec.resolve_schema_ref(&doc_file, reference)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
