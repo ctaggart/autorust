@@ -22,7 +22,7 @@ const SERVICE_NAMES: &[(&str, &str)] = &[
 
 const ONLY_SERVICES: &[&str] = &[
     // "network",
-    // "redis",
+    // "netapp",
 ];
 
 const SKIP_SERVICES: &[&str] = &[
@@ -37,18 +37,14 @@ const SKIP_SERVICES: &[&str] = &[
     "deviceprovisioningservices", // certificate_name used as parameter more than once
     "dnc",           // conflicting implementation for `v2020_08_08_preview::models::ControllerDetails`
     "hardwaresecuritymodules", // recursive without indirection on Error
-    "healthcareapis", // Error: "schema not found ../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json Resource"
-    "logic",          // TODO #73 recursive types
-    "machinelearning", // missing params
-    "mediaservices",  // Error: Error("invalid unicode code point", line: 1380, column: 289)
+    "logic",         // TODO #73 recursive types
+    "mediaservices", // Error: Error("invalid unicode code point", line: 1380, column: 289)
     "migrateprojects", // TODO #73 recursive types
-    "mixedreality",   // &AccountKeyRegenerateRequest not found in scope
-    "netapp",         // codegen wrong, missing operation params in function
-    "network",        // TODO #73 recursive types
+    "mixedreality",  // &AccountKeyRegenerateRequest not found in scope
+    "netapp",        // ParseIdentError { source: Error("expected identifier"), text: "10minutely"
+    "network",       // TODO #73 recursive types
     "powerplatform", // Error: "parameter not found ../azure-rest-api-specs/specification/powerplatform/resource-manager/Microsoft.PowerPlatform/common/v1/definitions.json ResourceGroupNameParameter"
     "recoveryservicessiterecovery", // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
-    "redis", // SchemaNotFound { ref_key: RefKey { file_path: "../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json", name: "Resource"
-    "redisenterprise", // SchemaNotFound { ref_key: RefKey { file_path: "../azure-rest-api-specs/specification/common-types/resource-management/v1/types.json", name: "Resource"
     "service-map", // thread 'main' panicked at '"Ref:machine" is not a valid Ident', /Users/cameron/.cargo/registry/src/github.com-1ecc6299db9ec823/proc-macro2-1.0.24/src/fallback.rs:693:9
     "servicefabric", // {}/providers/Microsoft.ServiceFabric/operations list defined twice
     "web",         // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 1950, column: 5)

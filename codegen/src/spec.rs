@@ -25,18 +25,8 @@ impl Spec {
     /// This eagerly collects all the schemas and parametes for the docs
     pub fn read_files<P: AsRef<Path>>(input_files_paths: &[P]) -> Result<Self> {
         let mut docs: IndexMap<PathBuf, OpenAPI> = IndexMap::new();
-        for input_file_path in input_files_paths {
-            let doc = openapi::parse(&input_file_path)?;
-            let ref_files = openapi::get_reference_file_paths(&doc);
-            docs.insert(input_file_path.as_ref().to_owned(), doc);
-
-            for ref_file in ref_files {
-                let doc_path = path::join(&input_file_path, &ref_file).context(PathJoin)?;
-                if !docs.contains_key(&doc_path) {
-                    let doc = openapi::parse(&doc_path)?;
-                    docs.insert(doc_path, doc);
-                }
-            }
+        for file_path in input_files_paths {
+            Spec::read_file(&mut docs, file_path)?;
         }
 
         let mut schemas: IndexMap<RefKey, Schema> = IndexMap::new();
@@ -69,6 +59,21 @@ impl Spec {
             parameters,
             input_files_paths: input_files_paths.iter().map(|f| f.as_ref().to_owned()).collect(),
         })
+    }
+
+    /// Read a file and references too, recursively into the map
+    fn read_file<P: AsRef<Path>>(docs: &mut IndexMap<PathBuf, OpenAPI>, file_path: P) -> Result<()> {
+        let file_path = file_path.as_ref();
+        if !docs.contains_key(file_path) {
+            let doc = openapi::parse(&file_path)?;
+            let ref_files = openapi::get_reference_file_paths(&doc);
+            docs.insert(PathBuf::from(file_path), doc);
+            for ref_file in ref_files {
+                let child_path = path::join(&file_path, &ref_file).context(PathJoin)?;
+                Spec::read_file(docs, &child_path)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn docs(&self) -> &IndexMap<PathBuf, OpenAPI> {
