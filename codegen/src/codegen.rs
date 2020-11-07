@@ -596,9 +596,13 @@ fn create_function(
     // see if there is a body parameter
     // let fresponse = create_function_return(operation_verb)?;
 
+    let mut is_post = false;
     let client_verb = match operation_verb {
         OperationVerb::Get(_) => quote! { client.get(uri_str) },
-        OperationVerb::Post(_) => quote! { client.post(uri_str) },
+        OperationVerb::Post(_) => {
+            is_post = true;
+            quote! { client.post(uri_str) }
+        }
         OperationVerb::Put(_) => quote! { client.put(uri_str) },
         OperationVerb::Patch(_) => quote! { client.patch(uri_str) },
         OperationVerb::Delete(_) => quote! { client.delete(uri_str) },
@@ -628,6 +632,7 @@ fn create_function(
     }
 
     // params
+    let mut has_body_parameter = false;
     for param in &parameters {
         let param_name = &param.name;
         let param_name_var = get_param_name(&param)?;
@@ -680,6 +685,7 @@ fn create_function(
                 }
             }
             ParameterType::Body => {
+                has_body_parameter = true;
                 if required {
                     ts_request_builder.extend(quote! {
                         req_builder = req_builder.json(#param_name_var);
@@ -706,6 +712,13 @@ fn create_function(
                 }
             }
         }
+    }
+
+    // if it is a post and there is no body, set the Content-Length to 0
+    if is_post && !has_body_parameter {
+        ts_request_builder.extend(quote! {
+            req_builder = req_builder.header(reqwest::header::CONTENT_LENGTH, 0);
+        });
     }
 
     let responses = &operation_verb.operation().responses;
