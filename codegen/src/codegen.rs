@@ -2,7 +2,7 @@ use crate::{
     identifier::{ident, CamelCaseIdent},
     spec,
     status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses, has_default_response},
-    Config, OperationVerb, ResolvedSchema, Spec,
+    Config, OperationVerb, PropertyName, ResolvedSchema, Spec,
 };
 use autorust_openapi::{
     CollectionFormat, DataType, Parameter, ParameterType, PathItem, Reference, ReferenceOr, Response, Schema, SchemaCommon,
@@ -248,6 +248,16 @@ impl CodeGen {
             } else {
                 quote! {}
             };
+            // see if a field shoud be wrapped in a Box
+            let prop_nm = &PropertyName {
+                file_path: PathBuf::from(doc_file),
+                schema_name: struct_name.to_owned(),
+                property_name: property_name.to_string(),
+            };
+            // println!("property {:?}", prop_nm);
+            if self.config.box_properties.contains(prop_nm) {
+                field_tp_name = quote! { Box<#field_tp_name> };
+            }
             props.extend(quote! {
                 #serde
                 pub #nm: #field_tp_name,

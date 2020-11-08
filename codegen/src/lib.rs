@@ -16,6 +16,7 @@ use proc_macro2::TokenStream;
 use snafu::{ResultExt, Snafu};
 
 use std::{
+    collections::HashSet,
     fs::{self, File},
     io::prelude::*,
     path::{Path, PathBuf},
@@ -56,11 +57,19 @@ pub enum Error {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PropertyName {
+    pub file_path: PathBuf,
+    pub schema_name: String,
+    pub property_name: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Config {
     pub input_files: Vec<PathBuf>,
     pub output_folder: PathBuf,
     pub api_version: Option<String>,
+    pub box_properties: HashSet<PropertyName>,
 }
 
 pub fn run(config: Config) -> Result<()> {

@@ -3,49 +3,32 @@
 use autorust_codegen::{
     self, cargo_toml,
     config_parser::{self, to_api_version, to_mod_name},
-    lib_rs, path, Config,
+    lib_rs, path, Config, PropertyName,
 };
 use heck::SnakeCase;
 use snafu::{OptionExt, ResultExt, Snafu};
-use std::{
-    collections::{HashMap, HashSet},
-    fs,
-};
+use std::{collections::HashSet, fs, path::PathBuf};
 
 const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
-const SERVICE_NAMES: &[(&str, &str)] = &[
-    // ("cosmos-db", "cosmos"),
-    // ("vmware", "avs")
-    ];
-
 const ONLY_SERVICES: &[&str] = &[
-    // "network",
-    // "netapp",
-    // "synapse",
     // "vmware",
 ];
 
 const SKIP_SERVICES: &[&str] = &[
-    "apimanagement",                // missing properties, all preview apis
-    "automation",                   // 'not yet implemented: Handle DataType::File
-    "cost-management",              // use of undeclared crate or module `definition`
-    "databox",                      // TODO #73 recursive types
-    "databoxedge",                  // duplicate model pub struct SkuCost {
+    "apimanagement",              // missing properties, all preview apis
+    "automation",                 // 'not yet implemented: Handle DataType::File
+    "databoxedge",                // duplicate model pub struct SkuCost {
     "datamigration", // Error: "schema not found ../azure-rest-api-specs/specification/datamigration/resource-manager/Microsoft.DataMigration/preview/2018-07-15-preview/definitions/MigrateSqlServerSqlDbTask.json ValidationStatus"
     "deploymentmanager", // missing params
     "deviceprovisioningservices", // certificate_name used as parameter more than once
     "dnc",           // conflicting implementation for `v2020_08_08_preview::models::ControllerDetails`
     "hardwaresecuritymodules", // recursive without indirection on Error
-    "logic",         // TODO #73 recursive types
     "mediaservices", // Error: Error("invalid unicode code point", line: 1380, column: 289)
-    "migrateprojects", // TODO #73 recursive types
     "mixedreality",  // &AccountKeyRegenerateRequest not found in scope
     "netapp",        // ParseIdentError { source: Error("expected identifier"), text: "10minutely"
-    "network",       // TODO #73 recursive types
     "powerplatform", // Error: "parameter not found ../azure-rest-api-specs/specification/powerplatform/resource-manager/Microsoft.PowerPlatform/common/v1/definitions.json ResourceGroupNameParameter"
-    "recoveryservicessiterecovery", // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
     "service-map", // thread 'main' panicked at '"Ref:machine" is not a valid Ident', /Users/cameron/.cargo/registry/src/github.com-1ecc6299db9ec823/proc-macro2-1.0.24/src/fallback.rs:693:9
     "servicefabric", // {}/providers/Microsoft.ServiceFabric/operations list defined twice
     "web",         // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 1950, column: 5)
@@ -58,6 +41,25 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("recoveryservicesbackup", "package-2020-07"), // duplicate fn get_operation_status
     ("network", "package-2017-03-30-only"),  // SchemaNotFound 2017-09-01/network.json SubResource
     ("synapse", "package-2019-06-01-preview"), // TODO #80 path parameters
+    ("recoveryservicessiterecovery", "package-2016-08"), // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
+];
+
+// becuse of recursive types, some properties have to be boxed
+// https://github.com/ctaggart/autorust/issues/73
+const BOX_PROPERTIES: &[(&str, &str, &str)] = &[
+    // cost-management
+    ("../azure-rest-api-specs/specification/cost-management/resource-manager/Microsoft.CostManagement/stable/2020-06-01/costmanagement.json", "ReportConfigFilter", "not"),
+    ("../azure-rest-api-specs/specification/cost-management/resource-manager/Microsoft.CostManagement/stable/2020-06-01/costmanagement.json", "QueryFilter", "not"),
+    // network
+    ("../azure-rest-api-specs/specification/network/resource-manager/Microsoft.Network/stable/2020-07-01/publicIpAddress.json", "PublicIpAddressPropertiesFormat", "ipConfiguration"),
+    // databox
+    ("../azure-rest-api-specs/specification/databox/resource-manager/Microsoft.DataBox/stable/2020-11-01/databox.json", "transferFilterDetails", "include"),
+    ("../azure-rest-api-specs/specification/databox/resource-manager/Microsoft.DataBox/stable/2020-11-01/databox.json", "transferAllDetails", "include"),
+    // logic
+    ("../azure-rest-api-specs/specification/logic/resource-manager/Microsoft.Logic/stable/2019-05-01/logic.json", "SwaggerSchema", "items"),
+    // migrateprojects
+    ("../azure-rest-api-specs/specification/migrateprojects/resource-manager/Microsoft.Migrate/preview/2018-09-01-preview/migrate.json", "IEdmNavigationProperty", "partner"),
+    ("../azure-rest-api-specs/specification/migrateprojects/resource-manager/Microsoft.Migrate/preview/2018-09-01-preview/migrate.json", "IEdmStructuredType", "baseType"),
 ];
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -133,6 +135,16 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
     let packages = config_parser::parse_configurations_from_autorest_config_file(&readme);
     let mut feature_mod_names = Vec::new();
     let skip_service_tags: HashSet<&(&str, &str)> = SKIP_SERVICE_TAGS.iter().collect();
+
+    let mut box_properties = HashSet::new();
+    for (file_path, schema_name, property_name) in BOX_PROPERTIES {
+        box_properties.insert(PropertyName {
+            file_path: PathBuf::from(file_path),
+            schema_name: schema_name.to_string(),
+            property_name: property_name.to_string(),
+        });
+    }
+
     for package in packages {
         let tag = package.tag.as_str();
         if let Some(api_version) = to_api_version(&package) {
@@ -163,6 +175,7 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
                 api_version: Some(api_version),
                 output_folder: mod_output_folder.into(),
                 input_files,
+                box_properties: box_properties.clone(),
             })
             .context(CodegenError)?;
         }
@@ -182,10 +195,5 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
 }
 
 fn get_service_name(spec_folder: &str) -> String {
-    let service_names: HashMap<_, _> = SERVICE_NAMES.iter().cloned().collect();
-    if let Some(service_name) = service_names.get(spec_folder) {
-        service_name.to_string()
-    } else {
-        spec_folder.to_snake_case().replace("-", "_")
-    }
+    spec_folder.to_snake_case().replace("-", "_")
 }
