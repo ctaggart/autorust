@@ -23,12 +23,13 @@ const SERVICE_NAMES: &[(&str, &str)] = &[
 const ONLY_SERVICES: &[&str] = &[
     // "network",
     // "netapp",
+    // "synapse",
+    // "vmware",
 ];
 
 const SKIP_SERVICES: &[&str] = &[
     "apimanagement",                // missing properties, all preview apis
     "automation",                   // 'not yet implemented: Handle DataType::File
-    "cosmos-db",                    // get_gremlin_graph_throughput defined twice
     "cost-management",              // use of undeclared crate or module `definition`
     "databox",                      // TODO #73 recursive types
     "databoxedge",                  // duplicate model pub struct SkuCost {
@@ -56,6 +57,7 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("resources", "package-policy-2020-09"), // SchemaNotFound { ref_key: RefKey { file_path: "../azure-rest-api-specs/specification/resources/resource-manager/Microsoft.Authorization/stable/2020-09-01/dataPolicyManifests.json", name: "CloudError"
     ("recoveryservicesbackup", "package-2020-07"), // duplicate fn get_operation_status
     ("network", "package-2017-03-30-only"),  // SchemaNotFound 2017-09-01/network.json SubResource
+    ("synapse", "package-2019-06-01-preview"), // TODO #80 path parameters
 ];
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
