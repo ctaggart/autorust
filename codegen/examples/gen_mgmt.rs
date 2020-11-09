@@ -17,21 +17,16 @@ const ONLY_SERVICES: &[&str] = &[
 ];
 
 const SKIP_SERVICES: &[&str] = &[
-    "apimanagement",              // missing properties, all preview apis
-    "automation",                 // 'not yet implemented: Handle DataType::File
-    "databoxedge",                // duplicate model pub struct SkuCost {
-    "datamigration", // Error: "schema not found ../azure-rest-api-specs/specification/datamigration/resource-manager/Microsoft.DataMigration/preview/2018-07-15-preview/definitions/MigrateSqlServerSqlDbTask.json ValidationStatus"
-    "deploymentmanager", // missing params
-    "deviceprovisioningservices", // certificate_name used as parameter more than once
-    "dnc",           // conflicting implementation for `v2020_08_08_preview::models::ControllerDetails`
-    "hardwaresecuritymodules", // recursive without indirection on Error
-    "mediaservices", // Error: Error("invalid unicode code point", line: 1380, column: 289)
-    "mixedreality",  // &AccountKeyRegenerateRequest not found in scope
-    "netapp",        // ParseIdentError { source: Error("expected identifier"), text: "10minutely"
-    "powerplatform", // Error: "parameter not found ../azure-rest-api-specs/specification/powerplatform/resource-manager/Microsoft.PowerPlatform/common/v1/definitions.json ResourceGroupNameParameter"
-    "service-map", // thread 'main' panicked at '"Ref:machine" is not a valid Ident', /Users/cameron/.cargo/registry/src/github.com-1ecc6299db9ec823/proc-macro2-1.0.24/src/fallback.rs:693:9
-    "servicefabric", // {}/providers/Microsoft.ServiceFabric/operations list defined twice
-    "web",         // Error: Error("data did not match any variant of untagged enum ReferenceOr", line: 1950, column: 5)
+    "automation",                 // TODO #81 DataType::File
+    "deploymentmanager",          // TODO #80 path parameters
+    "deviceprovisioningservices", // TODO #82 certificate_name used as parameter more than once
+    "dnc",                        // https://github.com/Azure/azure-rest-api-specs/pull/11578 two ControllerDetails types
+    "mixedreality",               // TODO #83 AccountKeyRegenerateRequest not generated
+    "netapp",                     // Ident "10minutely"
+    "powerplatform",              // https://github.com/Azure/azure-rest-api-specs/pull/11580 incorrect ref & duplicate Operations_List
+    "service-map",                // Ident "Ref:machine"
+    "servicefabric",              // https://github.com/Azure/azure-rest-api-specs/pull/11581 allOf mistakes and duplicate Operations_List
+    "web",                        // TODO #81 DataType::File
 ];
 
 const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
@@ -42,6 +37,14 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("network", "package-2017-03-30-only"),  // SchemaNotFound 2017-09-01/network.json SubResource
     ("synapse", "package-2019-06-01-preview"), // TODO #80 path parameters
     ("recoveryservicessiterecovery", "package-2016-08"), // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
+    ("mediaservices", "package-2019-05-preview"), // invalid unicode character of a dash instead of a hyphen https://github.com/Azure/azure-rest-api-specs/pull/11576
+    // datamigration, same error for all
+    // SchemaNotFound MigrateSqlServerSqlDbTask.json ValidationStatus, but may be buried
+    ("datamigration", "package-2018-07-15-preview"),
+    ("datamigration", "package-2018-04-19"),
+    ("datamigration", "package-2018-03-31-preview"),
+    ("datamigration", "package-2018-03-15-preview"),
+    ("datamigration", "package-2017-11-15-preview"),
 ];
 
 // becuse of recursive types, some properties have to be boxed
@@ -60,6 +63,8 @@ const BOX_PROPERTIES: &[(&str, &str, &str)] = &[
     // migrateprojects
     ("../azure-rest-api-specs/specification/migrateprojects/resource-manager/Microsoft.Migrate/preview/2018-09-01-preview/migrate.json", "IEdmNavigationProperty", "partner"),
     ("../azure-rest-api-specs/specification/migrateprojects/resource-manager/Microsoft.Migrate/preview/2018-09-01-preview/migrate.json", "IEdmStructuredType", "baseType"),
+    // hardwaresecuritymodels
+    ("../azure-rest-api-specs/specification/hardwaresecuritymodules/resource-manager/Microsoft.HardwareSecurityModules/preview/2018-10-31-preview/dedicatedhsm.json", "Error", "innererror"),
 ];
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
