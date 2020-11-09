@@ -1,6 +1,7 @@
 use autorust_codegen::Config;
 use clap::{App, Arg, ArgMatches};
 use snafu::{OptionExt, Snafu};
+use std::collections::HashSet;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, Snafu)]
@@ -30,10 +31,12 @@ fn config_try_new_from_matches(arg_matches: &ArgMatches) -> Result<Config> {
         .collect::<Vec<_>>();
     let output_folder = arg_matches.value_of(OUTPUT_FOLDER).context(OutputFolder)?.to_owned().into();
     let api_version = arg_matches.value_of(API_VERSION).map(String::from);
+    let box_properties = HashSet::new();
     Ok(Config {
         input_files,
         output_folder,
         api_version,
+        box_properties,
     })
 }
 

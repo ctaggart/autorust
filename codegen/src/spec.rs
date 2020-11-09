@@ -120,14 +120,11 @@ impl Spec {
             Some(file) => path::join(doc_path, &file).context(PathJoin)?,
         };
         let name = reference.name.ok_or_else(|| Error::NoNameInReference)?;
-        Ok(self
-            .parameters
-            .get(&RefKey {
-                file_path: full_path,
-                name,
-            })
-            .context(ParameterNotFound)?
-            .clone())
+        let ref_key = RefKey {
+            file_path: full_path,
+            name,
+        };
+        Ok(self.parameters.get(&ref_key).context(ParameterNotFound { ref_key })?.clone())
     }
 
     /// Resolve a reference or schema to a resolved schema
@@ -210,7 +207,9 @@ pub enum Error {
         ref_key: RefKey,
     },
     NoNameInReference,
-    ParameterNotFound,
+    ParameterNotFound {
+        ref_key: RefKey,
+    },
     NotImplemented,
     ReadFile {
         source: std::io::Error,
@@ -220,6 +219,7 @@ pub enum Error {
     },
     DeserializeJson {
         source: serde_json::Error,
+        path: PathBuf,
     },
 }
 
@@ -245,7 +245,7 @@ pub mod openapi {
         let api = if path.extension() == Some(OsStr::new("yaml")) || path.extension() == Some(OsStr::new("yml")) {
             serde_yaml::from_slice(&bytes).context(DeserializeYaml)?
         } else {
-            serde_json::from_slice(&bytes).context(DeserializeJson)?
+            serde_json::from_slice(&bytes).context(DeserializeJson { path: PathBuf::from(path) })?
         };
 
         Ok(api)
