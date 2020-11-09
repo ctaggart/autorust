@@ -14,7 +14,6 @@ const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
 const ONLY_SERVICES: &[&str] = &[
     // "vmware",
-    "recoveryservicesbackup"
 ];
 
 const SKIP_SERVICES: &[&str] = &[
