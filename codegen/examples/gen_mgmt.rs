@@ -14,6 +14,7 @@ const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
 const ONLY_SERVICES: &[&str] = &[
     // "vmware",
+    "recoveryservicesbackup"
 ];
 
 const SKIP_SERVICES: &[&str] = &[
@@ -34,6 +35,7 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("resources", "package-policy-2020-03"),
     ("resources", "package-policy-2020-09"), // SchemaNotFound { ref_key: RefKey { file_path: "../azure-rest-api-specs/specification/resources/resource-manager/Microsoft.Authorization/stable/2020-09-01/dataPolicyManifests.json", name: "CloudError"
     ("recoveryservicesbackup", "package-2020-07"), // duplicate fn get_operation_status
+    ("recoveryservicesbackup", "package-2020-10"), // duplicate fn get_operation_status
     ("network", "package-2017-03-30-only"),  // SchemaNotFound 2017-09-01/network.json SubResource
     ("synapse", "package-2019-06-01-preview"), // TODO #80 path parameters
     ("recoveryservicessiterecovery", "package-2016-08"), // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
