@@ -479,8 +479,7 @@ fn create_function_params(_cg: &CodeGen, _doc_file: &Path, parameters: &Vec<Para
         let tp = get_param_type(param)?;
         params.push(quote! { #name: #tp });
     }
-    let slf = quote! { operation_config: &crate::OperationConfig };
-    params.insert(0, slf);
+    params.insert(0, quote! { operation_config: &crate::OperationConfig<'a> });
     Ok(quote! { #(#params),* })
 }
 
@@ -917,7 +916,7 @@ fn create_function(
     }
 
     let func = quote! {
-        pub async fn #fname(#fparams) -> #fresponse {
+        pub async fn #fname<'a>(#fparams) -> #fresponse {
             let client = &operation_config.client;
             let uri_str = &format!(#fpath, &operation_config.base_path, #uri_str_args);
             let mut req_builder = #client_verb;

@@ -42,24 +42,53 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
         #generated_by
         #cfgs
 
-        pub struct OperationConfig {
-            pub api_version: String,
-            pub client: reqwest::Client,
-            pub base_path: String,
-            pub token_credential: Option<Box<dyn azure_core::TokenCredential>>,
-            pub token_credential_resource: String,
+        pub struct OperationConfig<'a> {
+            api_version: String,
+            client: reqwest::Client,
+            base_path: String,
+            token_credential: Option<&'a dyn azure_core::TokenCredential>,
+            token_credential_resource: String,
         }
 
-        impl OperationConfig {
-            pub fn new(token_credential: Box<dyn azure_core::TokenCredential>) -> Self {
-                Self {
-                    token_credential: Some(token_credential),
-                    ..Default::default()
-                }
+        impl<'a> OperationConfig<'a> {
+            pub fn new(token_credential: &'a dyn azure_core::TokenCredential) -> Self {
+                let mut config = Self::default();
+                config.set_token_credential(token_credential);
+                config
+            }
+            pub fn set_api_version(&mut self, api_version: String){
+                self.api_version = api_version;
+            }
+            pub fn api_version(&self) -> &str {
+                &self.api_version
+            }
+            pub fn set_client(&mut self, client: reqwest::Client){
+                self.client = client;
+            }
+            pub fn client(&self) -> &reqwest::Client {
+                &self.client
+            }
+            pub fn set_base_path(&mut self, base_path: String){
+                self.base_path = base_path;
+            }
+            pub fn base_path(&self) -> &str {
+                &self.base_path
+            }
+            pub fn set_token_credential(&mut self, token_credential: &'a dyn azure_core::TokenCredential){
+                self.token_credential = Some(token_credential);
+            }
+            pub fn token_credential(&self) -> Option<&'a dyn azure_core::TokenCredential> {
+                self.token_credential
+            }
+            pub fn set_token_credential_resource(&mut self, token_credential_resource: String){
+                self.token_credential_resource = token_credential_resource;
+            }
+            pub fn token_credential_resource(&self) -> &str {
+                &self.token_credential_resource
             }
         }
 
-        impl Default for OperationConfig {
+        impl<'a> Default for OperationConfig<'a> {
             fn default() -> Self {
                 Self {
                     api_version: API_VERSION.to_owned(),
