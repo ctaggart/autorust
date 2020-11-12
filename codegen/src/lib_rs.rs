@@ -42,42 +42,50 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
         #generated_by
         #cfgs
 
+        #[derive(Clone)]
         pub struct OperationConfig<'a> {
-            api_version: String,
-            client: reqwest::Client,
-            base_path: String,
-            token_credential: Option<&'a dyn azure_core::TokenCredential>,
+            client: &'a reqwest::Client,
+            token_credential: &'a dyn azure_core::TokenCredential,
             token_credential_resource: String,
+            base_path: String,
+            api_version: String,
         }
 
         impl<'a> OperationConfig<'a> {
-            pub fn new(token_credential: &'a dyn azure_core::TokenCredential) -> Self {
-                let mut config = Self::default();
-                config.set_token_credential(token_credential);
-                config
+            pub fn new(client: &'a reqwest::Client, token_credential: &'a dyn azure_core::TokenCredential) -> Self {
+                Self {
+                    client,
+                    token_credential,
+                    token_credential_resource: "https://management.azure.com/".to_owned(),
+                    base_path: "https://management.azure.com".to_owned(),
+                    api_version: API_VERSION.to_owned(),
+                }
             }
-            pub fn set_api_version(&mut self, api_version: String){
-                self.api_version = api_version;
+            pub fn new_all(
+                client: &'a reqwest::Client,
+                token_credential: &'a dyn azure_core::TokenCredential,
+                token_credential_resource: String,
+                base_path: String,
+                api_version: String,
+            ) -> Self {
+                Self {
+                    client,
+                    token_credential,
+                    token_credential_resource,
+                    base_path,
+                    api_version,
+                }
             }
-            pub fn api_version(&self) -> &str {
-                &self.api_version
-            }
-            pub fn set_client(&mut self, client: reqwest::Client){
+            pub fn set_client(&mut self, client: &'a reqwest::Client){
                 self.client = client;
             }
-            pub fn client(&self) -> &reqwest::Client {
-                &self.client
-            }
-            pub fn set_base_path(&mut self, base_path: String){
-                self.base_path = base_path;
-            }
-            pub fn base_path(&self) -> &str {
-                &self.base_path
+            pub fn client(&self) -> &'a reqwest::Client {
+                self.client
             }
             pub fn set_token_credential(&mut self, token_credential: &'a dyn azure_core::TokenCredential){
-                self.token_credential = Some(token_credential);
+                self.token_credential = token_credential;
             }
-            pub fn token_credential(&self) -> Option<&'a dyn azure_core::TokenCredential> {
+            pub fn token_credential(&self) -> &'a dyn azure_core::TokenCredential {
                 self.token_credential
             }
             pub fn set_token_credential_resource(&mut self, token_credential_resource: String){
@@ -86,18 +94,19 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
             pub fn token_credential_resource(&self) -> &str {
                 &self.token_credential_resource
             }
-        }
-
-        impl<'a> Default for OperationConfig<'a> {
-            fn default() -> Self {
-                Self {
-                    api_version: API_VERSION.to_owned(),
-                    client: reqwest::Client::new(),
-                    base_path: "https://management.azure.com".to_owned(),
-                    token_credential: None,
-                    token_credential_resource: "https://management.azure.com/".to_owned(),
-                }
+            pub fn set_base_path(&mut self, base_path: String){
+                self.base_path = base_path;
+            }
+            pub fn base_path(&self) -> &str {
+                &self.base_path
+            }
+            pub fn set_api_version(&mut self, api_version: String){
+                self.api_version = api_version;
+            }
+            pub fn api_version(&self) -> &str {
+                &self.api_version
             }
         }
+
     })
 }

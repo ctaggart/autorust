@@ -623,12 +623,10 @@ fn create_function(
 
     // auth
     ts_request_builder.extend(quote! {
-        if let Some(token_credential) = &operation_config.token_credential {
-            let token_response = token_credential
-                .get_token(&operation_config.token_credential_resource).await
-                .context(#fname::GetTokenError)?;
-            req_builder = req_builder.bearer_auth(token_response.token.secret());
-        }
+        let token_response = operation_config.token_credential
+            .get_token(&operation_config.token_credential_resource).await
+            .context(#fname::GetTokenError)?;
+        req_builder = req_builder.bearer_auth(token_response.token.secret());
     });
 
     // api-version param
