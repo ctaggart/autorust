@@ -479,7 +479,7 @@ fn create_function_params(_cg: &CodeGen, _doc_file: &Path, parameters: &Vec<Para
         let tp = get_param_type(param)?;
         params.push(quote! { #name: #tp });
     }
-    params.insert(0, quote! { operation_config: &crate::OperationConfig<'a> });
+    params.insert(0, quote! { operation_config: &crate::OperationConfig });
     Ok(quote! { #(#params),* })
 }
 
@@ -623,8 +623,8 @@ fn create_function(
 
     // auth
     ts_request_builder.extend(quote! {
-        let token_response = operation_config.token_credential
-            .get_token(&operation_config.token_credential_resource).await
+        let token_response = operation_config.token_credential()
+            .get_token(operation_config.token_credential_resource()).await
             .context(#fname::GetTokenError)?;
         req_builder = req_builder.bearer_auth(token_response.token.secret());
     });
@@ -633,7 +633,7 @@ fn create_function(
     if has_param_api_version {
         if let Some(_api_version) = cg.api_version() {
             ts_request_builder.extend(quote! {
-                req_builder = req_builder.query(&[("api-version", &operation_config.api_version)]);
+                req_builder = req_builder.query(&[("api-version", operation_config.api_version())]);
             });
         }
     }
@@ -914,9 +914,9 @@ fn create_function(
     }
 
     let func = quote! {
-        pub async fn #fname<'a>(#fparams) -> #fresponse {
-            let client = &operation_config.client;
-            let uri_str = &format!(#fpath, &operation_config.base_path, #uri_str_args);
+        pub async fn #fname(#fparams) -> #fresponse {
+            let client = operation_config.http_client();
+            let uri_str = &format!(#fpath, operation_config.base_path(), #uri_str_args);
             let mut req_builder = #client_verb;
             #ts_request_builder
             let req = req_builder.build().context(#fname::BuildRequestError)?;

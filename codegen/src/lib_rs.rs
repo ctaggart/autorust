@@ -43,18 +43,18 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
         #cfgs
 
         #[derive(Clone)]
-        pub struct OperationConfig<'a> {
-            client: &'a reqwest::Client,
-            token_credential: &'a dyn azure_core::TokenCredential,
+        pub struct OperationConfig {
+            http_client: azure_core::HttpClientArc,
+            token_credential: azure_core::TokenCredentialArc,
             token_credential_resource: String,
             base_path: String,
             api_version: String,
         }
 
-        impl<'a> OperationConfig<'a> {
-            pub fn new(client: &'a reqwest::Client, token_credential: &'a dyn azure_core::TokenCredential) -> Self {
+        impl OperationConfig {
+            pub fn new(http_client: azure_core::HttpClientArc, token_credential: azure_core::TokenCredentialArc) -> Self {
                 Self {
-                    client,
+                    http_client,
                     token_credential,
                     token_credential_resource: "https://management.azure.com/".to_owned(),
                     base_path: "https://management.azure.com".to_owned(),
@@ -62,31 +62,25 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
                 }
             }
             pub fn new_all(
-                client: &'a reqwest::Client,
-                token_credential: &'a dyn azure_core::TokenCredential,
+                http_client: azure_core::HttpClientArc,
+                token_credential: azure_core::TokenCredentialArc,
                 token_credential_resource: String,
                 base_path: String,
                 api_version: String,
             ) -> Self {
                 Self {
-                    client,
+                    http_client,
                     token_credential,
                     token_credential_resource,
                     base_path,
                     api_version,
                 }
             }
-            pub fn set_client(&mut self, client: &'a reqwest::Client){
-                self.client = client;
+            pub fn http_client(&self) -> &reqwest::Client {
+                self.http_client.as_ref()
             }
-            pub fn client(&self) -> &'a reqwest::Client {
-                self.client
-            }
-            pub fn set_token_credential(&mut self, token_credential: &'a dyn azure_core::TokenCredential){
-                self.token_credential = token_credential;
-            }
-            pub fn token_credential(&self) -> &'a dyn azure_core::TokenCredential {
-                self.token_credential
+            pub fn token_credential(&self) -> &dyn azure_core::TokenCredential {
+                self.token_credential.as_ref().as_ref()
             }
             pub fn set_token_credential_resource(&mut self, token_credential_resource: String){
                 self.token_credential_resource = token_credential_resource;
