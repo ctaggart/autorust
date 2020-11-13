@@ -18,12 +18,12 @@ pub enum Error {
     },
 }
 
-pub fn create(feature_mod_names: &Vec<(String, String)>, path: &Path) -> Result<()> {
-    write_file(path, &create_body(feature_mod_names)?).context(WriteFileError)?;
+pub fn create(crate_name: &str, feature_mod_names: &Vec<(String, String)>, path: &Path) -> Result<()> {
+    write_file(path, &create_body(crate_name, feature_mod_names)?).context(WriteFileError)?;
     Ok(())
 }
 
-fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream> {
+fn create_body(crate_name: &str, feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream> {
     let mut cfgs = TokenStream::new();
     for (feature_name, mod_name) in feature_mod_names {
         let mod_name = ident(mod_name).context(IdentModNameError {
@@ -38,8 +38,10 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
         });
     }
     let generated_by = create_generated_by_header();
+    let user_agent_sdk = format!("azsdk-rust-{}/0.1.0", crate_name);
     Ok(quote! {
         #generated_by
+        pub const USER_AGENT_SDK: &str = #user_agent_sdk;
         #cfgs
 
         #[derive(Clone)]
@@ -49,6 +51,7 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
             token_credential_resource: String,
             base_path: String,
             api_version: String,
+            user_agent: Option<String>,
         }
 
         impl OperationConfig {
@@ -59,6 +62,7 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
                     token_credential_resource: "https://management.azure.com/".to_owned(),
                     base_path: "https://management.azure.com".to_owned(),
                     api_version: API_VERSION.to_owned(),
+                    user_agent: Some(format!("{} ({})", USER_AGENT_SDK, std::env::consts::ARCH)),
                 }
             }
             pub fn new_all(
@@ -67,6 +71,7 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
                 token_credential_resource: String,
                 base_path: String,
                 api_version: String,
+                user_agent: Option<String>,
             ) -> Self {
                 Self {
                     http_client,
@@ -74,6 +79,7 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
                     token_credential_resource,
                     base_path,
                     api_version,
+                    user_agent,
                 }
             }
             pub fn http_client(&self) -> &reqwest::Client {
@@ -99,6 +105,12 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
             }
             pub fn api_version(&self) -> &str {
                 &self.api_version
+            }
+            pub fn user_agent(&self) -> Option<&str> {
+                self.user_agent.as_deref()
+            }
+            pub fn set_user_agent(&mut self, user_agent: Option<String>){
+                self.user_agent = user_agent;
             }
         }
 

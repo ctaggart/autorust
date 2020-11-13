@@ -13,7 +13,8 @@ const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
 const ONLY_SERVICES: &[&str] = &[
-    // "vmware",
+    // "resources",
+    // "vmware"
 ];
 
 const SKIP_SERVICES: &[&str] = &[
@@ -130,7 +131,6 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
 
     let service_name = &get_service_name(spec_folder);
     // println!("{} -> {}", spec_folder, service_name);
-    let crate_name = &format!("azure_mgmt_{}", service_name);
     let output_folder = &path::join(OUTPUT_FOLDER, service_name).context(PathError)?;
 
     let src_folder = path::join(output_folder, "src").context(PathError)?;
@@ -190,12 +190,17 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
         return Ok(());
     }
     cargo_toml::create(
-        crate_name,
+        &format!("azure_mgmt_{}", service_name),
         &feature_mod_names,
         &path::join(output_folder, "Cargo.toml").context(PathError)?,
     )
     .context(CargoTomlError)?;
-    lib_rs::create(&feature_mod_names, &path::join(src_folder, "lib.rs").context(PathError)?).context(LibRsError)?;
+    lib_rs::create(
+        &format!("mgmt_{}", service_name),
+        &feature_mod_names,
+        &path::join(src_folder, "lib.rs").context(PathError)?,
+    )
+    .context(LibRsError)?;
 
     Ok(())
 }

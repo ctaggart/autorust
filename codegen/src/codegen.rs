@@ -918,6 +918,9 @@ fn create_function(
             let client = operation_config.http_client();
             let uri_str = &format!(#fpath, operation_config.base_path(), #uri_str_args);
             let mut req_builder = #client_verb;
+            if let Some(user_agent) = operation_config.user_agent(){
+                req_builder = req_builder.header(reqwest::header::USER_AGENT, user_agent);
+            }
             #ts_request_builder
             let req = req_builder.build().context(#fname::BuildRequestError)?;
             let rsp = client.execute(req).await.context(#fname::ExecuteRequestError)?;
