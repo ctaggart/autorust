@@ -48,12 +48,8 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("datamigration", "package-2018-03-31-preview"),
     ("datamigration", "package-2018-03-15-preview"),
     ("datamigration", "package-2017-11-15-preview"),
-    ("compute", "package-2020-10-01-preview"), // TODO #81 DataType::File
+    ("compute", "package-2020-10-01-preview"),      // TODO #81 DataType::File
     ("compute", "package-2020-10-01-preview-only"), // TODO #81 DataType::File
-    ("cosmos-db", "package-2020-09"), // redifined
-    ("cosmos-db", "package-2020-04"), // redifined
-    ("cosmos-db", "package-2020-03"), // redifined
-    ("cosmos-db", "package-2019-12"), // redifined
 ];
 
 // becuse of recursive types, some properties have to be boxed
