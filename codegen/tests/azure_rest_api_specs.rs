@@ -16,7 +16,7 @@ const VMWARE_SPEC: &str = "../../azure-rest-api-specs/specification/vmware/resou
 fn refs_count_security_common() -> Result<()> {
     let api = &spec::openapi::parse(COMMON_TYPES_SPEC)?;
     let refs = spec::openapi::get_references(api);
-    assert_eq!(13, refs.len());
+    assert_eq!(15, refs.len());
     Ok(())
 }
 
@@ -24,7 +24,7 @@ fn refs_count_security_common() -> Result<()> {
 fn refs_count_avs() -> Result<()> {
     let api = &spec::openapi::parse(VMWARE_SPEC)?;
     let refs = spec::openapi::get_references(api);
-    assert_eq!(197, refs.len());
+    assert_eq!(199, refs.len());
     Ok(())
 }
 
