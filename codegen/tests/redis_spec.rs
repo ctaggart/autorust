@@ -28,7 +28,7 @@ fn test_redis_ref_files() -> Result<()> {
 fn test_redis_read_spec() -> Result<()> {
     let spec = &Spec::read_files(&[REDIS_SPEC])?;
     println!("{:#?}", spec.docs().keys());
-    assert_eq!(3, spec.docs().len());
+    assert_eq!(4, spec.docs().len());
     assert!(spec.docs().contains_key(std::path::Path::new(
         "../../azure-rest-api-specs/specification/common-types/resource-management/v2/types.json"
     )));

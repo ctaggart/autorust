@@ -114,21 +114,26 @@ impl CodeGen {
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
         let mut modules: IndexMap<Option<String>, TokenStream> = IndexMap::new();
+        // println!("input_files {:?}", self.input_files());
         for (doc_file, doc) in self.spec.docs() {
-            let paths = self.spec.resolve_path_map(doc_file, &doc.paths).context(SpecError)?;
-            for (path, item) in &paths {
-                for op in spec::path_item_operations(item) {
-                    let (module_name, function_name) = op.function_name(path);
-                    let function = create_function(self, doc_file, path, item, &op, &param_re, &function_name)?;
-                    if modules.contains_key(&module_name) {}
-                    match modules.get_mut(&module_name) {
-                        Some(module) => {
-                            module.extend(function);
-                        }
-                        None => {
-                            let mut module = TokenStream::new();
-                            module.extend(function);
-                            modules.insert(module_name, module);
+            // only operations from listed input files
+            // println!("doc_file {:?}", doc_file);
+            if self.spec.is_input_file(&doc_file) {
+                let paths = self.spec.resolve_path_map(doc_file, &doc.paths).context(SpecError)?;
+                for (path, item) in &paths {
+                    for op in spec::path_item_operations(item) {
+                        let (module_name, function_name) = op.function_name(path);
+                        let function = create_function(self, doc_file, path, item, &op, &param_re, &function_name)?;
+                        if modules.contains_key(&module_name) {}
+                        match modules.get_mut(&module_name) {
+                            Some(module) => {
+                                module.extend(function);
+                            }
+                            None => {
+                                let mut module = TokenStream::new();
+                                module.extend(function);
+                                modules.insert(module_name, module);
+                            }
                         }
                     }
                 }
