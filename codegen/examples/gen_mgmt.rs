@@ -14,6 +14,8 @@ const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
 const ONLY_SERVICES: &[&str] = &[
     // "vmware",
+    // "network",
+    // "cosmos-db",
 ];
 
 const SKIP_SERVICES: &[&str] = &[
@@ -46,6 +48,12 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("datamigration", "package-2018-03-31-preview"),
     ("datamigration", "package-2018-03-15-preview"),
     ("datamigration", "package-2017-11-15-preview"),
+    ("compute", "package-2020-10-01-preview"), // TODO #81 DataType::File
+    ("compute", "package-2020-10-01-preview-only"), // TODO #81 DataType::File
+    ("cosmos-db", "package-2020-09"), // redifined
+    ("cosmos-db", "package-2020-04"), // redifined
+    ("cosmos-db", "package-2020-03"), // redifined
+    ("cosmos-db", "package-2019-12"), // redifined
 ];
 
 // becuse of recursive types, some properties have to be boxed
@@ -56,6 +64,7 @@ const BOX_PROPERTIES: &[(&str, &str, &str)] = &[
     ("../azure-rest-api-specs/specification/cost-management/resource-manager/Microsoft.CostManagement/stable/2020-06-01/costmanagement.json", "QueryFilter", "not"),
     // network
     ("../azure-rest-api-specs/specification/network/resource-manager/Microsoft.Network/stable/2020-07-01/publicIpAddress.json", "PublicIPAddressPropertiesFormat", "ipConfiguration"),
+    ("../azure-rest-api-specs/specification/network/resource-manager/Microsoft.Network/stable/2020-08-01/publicIpAddress.json", "PublicIPAddressPropertiesFormat", "ipConfiguration"),
     // databox
     ("../azure-rest-api-specs/specification/databox/resource-manager/Microsoft.DataBox/stable/2020-11-01/databox.json", "transferFilterDetails", "include"),
     ("../azure-rest-api-specs/specification/databox/resource-manager/Microsoft.DataBox/stable/2020-11-01/databox.json", "transferAllDetails", "include"),
