@@ -43,31 +43,42 @@ fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream>
         #cfgs
 
         pub struct OperationConfig {
-            pub api_version: String,
-            pub client: reqwest::Client,
-            pub base_path: String,
-            pub token_credential: Option<Box<dyn azure_core::TokenCredential>>,
-            pub token_credential_resource: String,
+            api_version: String,
+            http_client: std::sync::Arc<std::boxed::Box<dyn azure_core::HttpClient>>,
+            base_path: String,
+            token_credential: Option<Box<dyn azure_core::TokenCredential>>,
+            token_credential_resource: String,
         }
 
         impl OperationConfig {
-            pub fn new(token_credential: Box<dyn azure_core::TokenCredential>) -> Self {
+            pub fn new(http_client: std::sync::Arc<std::boxed::Box<dyn azure_core::HttpClient>>, token_credential: Box<dyn azure_core::TokenCredential>) -> Self {
                 Self {
-                    token_credential: Some(token_credential),
-                    ..Default::default()
-                }
-            }
-        }
-
-        impl Default for OperationConfig {
-            fn default() -> Self {
-                Self {
+                    http_client,
                     api_version: API_VERSION.to_owned(),
-                    client: reqwest::Client::new(),
                     base_path: "https://management.azure.com".to_owned(),
-                    token_credential: None,
+                    token_credential: Some(token_credential),
                     token_credential_resource: "https://management.azure.com/".to_owned(),
                 }
+            }
+
+            pub fn api_version(&self) -> &str {
+                self.api_version.as_str()
+            }
+
+            pub fn http_client(&self) -> &dyn azure_core::HttpClient {
+                self.http_client.as_ref().as_ref()
+            }
+
+            pub fn base_path(&self) -> &str {
+                self.base_path.as_str()
+            }
+
+            pub fn token_credential(&self) -> Option<&dyn azure_core::TokenCredential> {
+                self.token_credential.as_deref()
+            }
+
+            pub fn token_credential_resource(&self) -> &str {
+                self.token_credential_resource.as_str()
             }
         }
     })

@@ -1,4 +1,4 @@
-// cargo run --example gen_mgmt
+// cargo run --example gen_mgmt --release
 // https://github.com/Azure/azure-rest-api-specs/blob/master/specification/compute/resource-manager
 use autorust_codegen::{
     self, cargo_toml,
@@ -13,7 +13,7 @@ const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
 const ONLY_SERVICES: &[&str] = &[
-    // "vmware",
+    "vmware",
     // "network",
     // "cosmos-db",
 ];
