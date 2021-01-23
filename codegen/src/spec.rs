@@ -213,9 +213,11 @@ pub enum Error {
     NotImplemented,
     ReadFile {
         source: std::io::Error,
+        path: PathBuf,
     },
     DeserializeYaml {
         source: serde_yaml::Error,
+        path: PathBuf,
     },
     DeserializeJson {
         source: serde_json::Error,
@@ -241,9 +243,9 @@ pub mod openapi {
     /// Parse an OpenAPI object from a file located at `path`
     pub fn parse<P: AsRef<Path>>(path: P) -> Result<OpenAPI> {
         let path = path.as_ref();
-        let bytes = fs::read(path).context(ReadFile)?;
+        let bytes = fs::read(path).context(ReadFile { path: PathBuf::from(path) })?;
         let api = if path.extension() == Some(OsStr::new("yaml")) || path.extension() == Some(OsStr::new("yml")) {
-            serde_yaml::from_slice(&bytes).context(DeserializeYaml)?
+            serde_yaml::from_slice(&bytes).context(DeserializeYaml { path: PathBuf::from(path) })?
         } else {
             serde_json::from_slice(&bytes).context(DeserializeJson { path: PathBuf::from(path) })?
         };

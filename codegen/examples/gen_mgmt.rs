@@ -2,14 +2,13 @@
 // https://github.com/Azure/azure-rest-api-specs/blob/master/specification/compute/resource-manager
 use autorust_codegen::{
     self, cargo_toml,
-    config_parser::{self, to_api_version, to_mod_name},
-    lib_rs, path, Config, PropertyName,
+    config_parser::{to_api_version, to_mod_name},
+    get_mgmt_configs, lib_rs, path, Config, PropertyName, SpecConfigs,
 };
 use heck::SnakeCase;
-use snafu::{OptionExt, ResultExt, Snafu};
+use snafu::{ResultExt, Snafu};
 use std::{collections::HashSet, fs, path::PathBuf};
 
-const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 
 const ONLY_SERVICES: &[&str] = &[
@@ -94,47 +93,30 @@ pub enum Error {
     LibRsError {
         source: lib_rs::Error,
     },
+    GetSpecFoldersError {
+        source: autorust_codegen::Error,
+    },
 }
 
 fn main() -> Result<()> {
-    let paths = fs::read_dir(SPEC_FOLDER).context(IoError)?;
-    let mut spec_folders = Vec::new();
-    for path in paths {
-        let path = path.context(IoError)?;
-        if path.file_type().context(IoError)?.is_dir() {
-            let file_name = path.file_name();
-            let spec_folder = file_name.to_str().context(FileNameNotUtf8Error)?;
-            spec_folders.push(spec_folder.to_owned());
-        }
-    }
-    spec_folders.sort();
-
-    if ONLY_SERVICES.len() > 0 {
-        for (i, spec_folder) in ONLY_SERVICES.iter().enumerate() {
-            println!("{} {}", i + 1, spec_folder);
-            gen_crate(spec_folder)?;
-        }
-    } else {
-        for (i, spec_folder) in spec_folders.iter().enumerate() {
-            println!("{} {}", i + 1, spec_folder);
-            if !SKIP_SERVICES.contains(&spec_folder.as_str()) {
-                gen_crate(spec_folder)?;
+    for (i, spec) in get_mgmt_configs().context(GetSpecFoldersError)?.iter().enumerate() {
+        if ONLY_SERVICES.len() > 0 {
+            if ONLY_SERVICES.contains(&spec.spec()) {
+                println!("{} {}", i + 1, spec.spec());
+                gen_crate(spec)?;
+            }
+        } else {
+            if !SKIP_SERVICES.contains(&spec.spec()) {
+                println!("{} {}", i + 1, spec.spec());
+                gen_crate(spec)?;
             }
         }
     }
     Ok(())
 }
 
-fn gen_crate(spec_folder: &str) -> Result<()> {
-    let spec_folder_full = path::join(SPEC_FOLDER, spec_folder).context(PathError)?;
-    let readme = &path::join(spec_folder_full, "resource-manager/readme.md").context(PathError)?;
-    if !readme.exists() {
-        println!("readme not found at {:?}", readme);
-        return Ok(());
-    }
-
-    let service_name = &get_service_name(spec_folder);
-    // println!("{} -> {}", spec_folder, service_name);
+fn gen_crate(spec: &SpecConfigs) -> Result<()> {
+    let service_name = &get_service_name(spec.spec());
     let crate_name = &format!("azure_mgmt_{}", service_name);
     let output_folder = &path::join(OUTPUT_FOLDER, service_name).context(PathError)?;
 
@@ -143,7 +125,6 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
         fs::remove_dir_all(&src_folder).context(IoError)?;
     }
 
-    let packages = config_parser::parse_configurations_from_autorest_config_file(&readme);
     let mut feature_mod_names = Vec::new();
     let skip_service_tags: HashSet<&(&str, &str)> = SKIP_SERVICE_TAGS.iter().collect();
 
@@ -156,27 +137,27 @@ fn gen_crate(spec_folder: &str) -> Result<()> {
         });
     }
 
-    for package in packages {
-        let tag = package.tag.as_str();
-        if let Some(api_version) = to_api_version(&package) {
-            if skip_service_tags.contains(&(spec_folder, tag)) {
+    for config in spec.configs() {
+        let tag = config.tag.as_str();
+        if let Some(api_version) = to_api_version(&config) {
+            if skip_service_tags.contains(&(spec.spec(), tag)) {
                 // println!("  skipping {}", tag);
                 continue;
             }
-            // println!("  {}", tag);
+            println!("  {}", tag);
             // println!("  {}", api_version);
             let mod_name = &to_mod_name(tag);
             feature_mod_names.push((tag.to_string(), mod_name.clone()));
             // println!("  {}", mod_name);
             let mod_output_folder = path::join(&src_folder, mod_name).context(PathError)?;
             // println!("  {:?}", mod_output_folder);
-            // for input_file in &package.input_files {
+            // for input_file in &config.input_files {
             //     println!("  {}", input_file);
             // }
-            let input_files: Result<Vec<_>> = package
+            let input_files: Result<Vec<_>> = config
                 .input_files
                 .iter()
-                .map(|input_file| Ok(path::join(readme, input_file).context(PathError)?))
+                .map(|input_file| Ok(path::join(spec.readme(), input_file).context(PathError)?))
                 .collect();
             let input_files = input_files?;
             // for input_file in &input_files {
