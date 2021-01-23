@@ -702,13 +702,16 @@ fn create_function(
                 has_body_parameter = true;
                 if required {
                     ts_request_builder.extend(quote! {
-                        req_builder = req_builder.json(#param_name_var);
+                        let req_body = bytes::Bytes::from_static(azure_core::EMPTY_BODY);
                     });
                 } else {
                     ts_request_builder.extend(quote! {
-                        if let Some(#param_name_var) = #param_name_var {
-                            req_builder = req_builder.json(#param_name_var);
-                        }
+                        let req_body =
+                            if let Some(#param_name_var) = #param_name_var {
+                                #param_name_var
+                            } else {
+                                bytes::Bytes::from_static(azure_core::EMPTY_BODY)
+                            };
                     });
                 }
             }
@@ -726,6 +729,12 @@ fn create_function(
                 }
             }
         }
+    }
+
+    if !has_body_parameter {
+        ts_request_builder.extend(quote! {
+            let req_body = bytes::Bytes::from_static(azure_core::EMPTY_BODY);
+        });
     }
 
     // if it is a post and there is no body, set the Content-Length to 0
@@ -811,8 +820,8 @@ fn create_function(
                         Some(tp) => {
                             match_status.extend(quote! {
                                 http::StatusCode::#status_code_name => {
-                                    let body = rsp.body();
-                                    let rsp_value: #tp = serde_json::from_slice(body).context(#fname::DeserializeError { body: body.clone() })?;
+                                    let rsp_body = rsp.body();
+                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
                                     Ok(rsp_value)
                                 }
                             });
@@ -830,8 +839,8 @@ fn create_function(
                         Some(tp) => {
                             match_status.extend(quote! {
                                 http::StatusCode::#status_code_name => {
-                                    let body = rsp.body();
-                                    let rsp_value: #tp = serde_json::from_slice(body).context(#fname::DeserializeError { body: body.clone() })?;
+                                    let rsp_body = rsp.body();
+                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
                                     Ok(#fname::Response::#response_type_name(rsp_value))
                                 }
                             });
@@ -865,8 +874,8 @@ fn create_function(
                     Some(tp) => {
                         match_status.extend(quote! {
                             http::StatusCode::#status_code_name => {
-                                let body = rsp.body();
-                                let rsp_value: #tp = serde_json::from_slice(body).context(#fname::DeserializeError { body: body.clone() })?;
+                                let rsp_body = rsp.body();
+                                let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
                                 #fname::#response_type_name{value: rsp_value}.fail()
                             }
                         });
@@ -894,8 +903,8 @@ fn create_function(
                         Some(tp) => {
                             match_status.extend(quote! {
                                 status_code => {
-                                    let body = rsp.body();
-                                    let rsp_value: #tp = serde_json::from_slice(body).context(#fname::DeserializeError { body: body.clone() })?;
+                                    let rsp_body = rsp.body();
+                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
                                     #fname::DefaultResponse{status_code, value: rsp_value}.fail()
                                 }
                             });
@@ -914,8 +923,8 @@ fn create_function(
     } else {
         match_status.extend(quote! {
             status_code => {
-                let body = rsp.body();
-                #fname::UnexpectedResponse{status_code, body: body.clone()}.fail()
+                let rsp_body = rsp.body();
+                #fname::UnexpectedResponse{status_code, body: rsp_body.clone()}.fail()
             }
         });
     }
@@ -928,8 +937,7 @@ fn create_function(
             let mut req_builder = http::request::Builder::new();
             #ts_request_builder
             req_builder = req_builder.uri(url.as_str());
-            let body = bytes::Bytes::from_static(azure_core::EMPTY_BODY);
-            let req = req_builder.body(body).context(#fname::BuildRequestError)?;
+            let req = req_builder.body(req_body).context(#fname::BuildRequestError)?;
             let rsp = http_client.execute_request(req).await.context(#fname::ExecuteRequestError)?;
             match rsp.status() {
                 #match_status
