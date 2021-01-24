@@ -365,6 +365,10 @@ fn is_array(schema: &SchemaCommon) -> bool {
     matches!(schema.type_, Some(DataType::Array))
 }
 
+fn is_string(schema: &SchemaCommon) -> bool {
+    matches!(schema.type_, Some(DataType::String))
+}
+
 fn get_schema_array_items(schema: &SchemaCommon) -> Result<&ReferenceOr<Schema>> {
     Ok(schema.items.as_ref().as_ref().context(ArrayExpectedToHaveItems)?)
 }
@@ -658,19 +662,35 @@ fn create_function(
                 let query_body = if is_array {
                     let collection_format = param.collection_format.as_ref().unwrap_or(&CollectionFormat::Csv);
                     match collection_format {
-                            CollectionFormat::Multi => Some(quote! {
-                                for value in #param_name_var {
-                                    url.query_pairs_mut().append_pair(#param_name, value);
+                        CollectionFormat::Multi => Some(
+                            if is_string(&param.common){
+                                quote! {
+                                    for value in #param_name_var {
+                                        url.query_pairs_mut().append_pair(#param_name, value);
+                                    }
                                 }
-                            }),
-                            CollectionFormat::Csv | // TODO #71
-                            CollectionFormat::Ssv |
-                            CollectionFormat::Tsv |
-                            CollectionFormat::Pipes => None,
-                        }
+                            } else {
+                                quote! {
+                                    for value in #param_name_var {
+                                        url.query_pairs_mut().append_pair(#param_name, value.to_string().as_str());
+                                    }
+                                }
+                            }
+                        ),
+                        CollectionFormat::Csv | // TODO #71
+                        CollectionFormat::Ssv |
+                        CollectionFormat::Tsv |
+                        CollectionFormat::Pipes => None,
+                    }
                 } else {
-                    Some(quote! {
-                        url.query_pairs_mut().append_pair(#param_name, #param_name_var);
+                    Some(if is_string(&param.common) {
+                        quote! {
+                            url.query_pairs_mut().append_pair(#param_name, #param_name_var);
+                        }
+                    } else {
+                        quote! {
+                            url.query_pairs_mut().append_pair(#param_name, #param_name_var.to_string().as_str());
+                        }
                     })
                 };
                 if let Some(query_body) = query_body {
@@ -708,7 +728,7 @@ fn create_function(
                     ts_request_builder.extend(quote! {
                         let req_body =
                             if let Some(#param_name_var) = #param_name_var {
-                                #param_name_var
+                                azure_core::to_json(#param_name_var).context(#fname::SerializeError)?
                             } else {
                                 bytes::Bytes::from_static(azure_core::EMPTY_BODY)
                             };
@@ -956,6 +976,7 @@ fn create_function(
                 ParseUrlError { source: url::ParseError },
                 BuildRequestError { source: http::Error },
                 ExecuteRequestError { source: Box<dyn std::error::Error + Sync + Send> },
+                SerializeError { source: Box<dyn std::error::Error + Sync + Send> },
                 DeserializeError { source: serde_json::Error, body: bytes::Bytes },
                 GetTokenError { source: azure_core::errors::AzureError },
             }
