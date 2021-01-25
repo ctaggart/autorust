@@ -109,7 +109,6 @@ impl CodeGen {
             #![allow(unused_variables)]
             #![allow(unused_imports)]
             use crate::models::*;
-            use reqwest::StatusCode;
             use snafu::{ResultExt, Snafu};
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
@@ -149,7 +148,6 @@ impl CodeGen {
                     file.extend(quote! {
                         pub mod #name {
                             use crate::models::*;
-                            use reqwest::StatusCode;
                             use snafu::{ResultExt, Snafu};
                             #module
                         }
@@ -365,6 +363,10 @@ fn is_vec(ts: &TokenStream) -> bool {
 
 fn is_array(schema: &SchemaCommon) -> bool {
     matches!(schema.type_, Some(DataType::Array))
+}
+
+fn is_string(schema: &SchemaCommon) -> bool {
+    matches!(schema.type_, Some(DataType::String))
 }
 
 fn get_schema_array_items(schema: &SchemaCommon) -> Result<&ReferenceOr<Schema>> {
@@ -590,7 +592,7 @@ fn create_function(
         })
         .collect();
     let params = params?;
-    let uri_str_args = quote! { #(#params),* };
+    let url_str_args = quote! { #(#params),* };
 
     let fpath = format!("{{}}{}", &format_path(param_re, path));
 
@@ -611,29 +613,30 @@ fn create_function(
     // see if there is a body parameter
     // let fresponse = create_function_return(operation_verb)?;
 
+    let mut ts_request_builder = TokenStream::new();
+
     let mut is_post = false;
-    let client_verb = match operation_verb {
-        OperationVerb::Get(_) => quote! { client.get(uri_str) },
+    let req_verb = match operation_verb {
+        OperationVerb::Get(_) => quote! { req_builder = req_builder.method(http::Method::GET); },
         OperationVerb::Post(_) => {
             is_post = true;
-            quote! { client.post(uri_str) }
+            quote! { req_builder = req_builder.method(http::Method::POST); }
         }
-        OperationVerb::Put(_) => quote! { client.put(uri_str) },
-        OperationVerb::Patch(_) => quote! { client.patch(uri_str) },
-        OperationVerb::Delete(_) => quote! { client.delete(uri_str) },
-        OperationVerb::Options(_) => quote! { client.options(uri_str) },
-        OperationVerb::Head(_) => quote! { client.head(uri_str) },
+        OperationVerb::Put(_) => quote! { req_builder = req_builder.method(http::Method::PUT); },
+        OperationVerb::Patch(_) => quote! { req_builder = req_builder.method(http::Method::PATCH); },
+        OperationVerb::Delete(_) => quote! { req_builder = req_builder.method(http::Method::DELETE); },
+        OperationVerb::Options(_) => quote! { req_builder = req_builder.method(http::Method::OPTIONS); },
+        OperationVerb::Head(_) => quote! { req_builder = req_builder.method(http::Method::HEAD); },
     };
-
-    let mut ts_request_builder = TokenStream::new();
+    ts_request_builder.extend(req_verb);
 
     // auth
     ts_request_builder.extend(quote! {
-        if let Some(token_credential) = &operation_config.token_credential {
+        if let Some(token_credential) = operation_config.token_credential() {
             let token_response = token_credential
-                .get_token(&operation_config.token_credential_resource).await
+                .get_token(operation_config.token_credential_resource()).await
                 .context(#fname::GetTokenError)?;
-            req_builder = req_builder.bearer_auth(token_response.token.secret());
+            req_builder = req_builder.header(http::header::AUTHORIZATION, format!("Bearer {}", token_response.token.secret()));
         }
     });
 
@@ -641,7 +644,7 @@ fn create_function(
     if has_param_api_version {
         if let Some(_api_version) = cg.api_version() {
             ts_request_builder.extend(quote! {
-                req_builder = req_builder.query(&[("api-version", &operation_config.api_version)]);
+                url.query_pairs_mut().append_pair("api-version", operation_config.api_version());
             });
         }
     }
@@ -659,19 +662,35 @@ fn create_function(
                 let query_body = if is_array {
                     let collection_format = param.collection_format.as_ref().unwrap_or(&CollectionFormat::Csv);
                     match collection_format {
-                            CollectionFormat::Multi => Some(quote! {
-                                for value in #param_name_var {
-                                    req_builder = req_builder.query(&[(#param_name, value)]);
+                        CollectionFormat::Multi => Some(
+                            if is_string(&param.common){
+                                quote! {
+                                    for value in #param_name_var {
+                                        url.query_pairs_mut().append_pair(#param_name, value);
+                                    }
                                 }
-                            }),
-                            CollectionFormat::Csv | // TODO #71
-                            CollectionFormat::Ssv |
-                            CollectionFormat::Tsv |
-                            CollectionFormat::Pipes => None,
-                        }
+                            } else {
+                                quote! {
+                                    for value in #param_name_var {
+                                        url.query_pairs_mut().append_pair(#param_name, value.to_string().as_str());
+                                    }
+                                }
+                            }
+                        ),
+                        CollectionFormat::Csv | // TODO #71
+                        CollectionFormat::Ssv |
+                        CollectionFormat::Tsv |
+                        CollectionFormat::Pipes => None,
+                    }
                 } else {
-                    Some(quote! {
-                        req_builder = req_builder.query(&[(#param_name, #param_name_var)]);
+                    Some(if is_string(&param.common) {
+                        quote! {
+                            url.query_pairs_mut().append_pair(#param_name, #param_name_var);
+                        }
+                    } else {
+                        quote! {
+                            url.query_pairs_mut().append_pair(#param_name, #param_name_var.to_string().as_str());
+                        }
                     })
                 };
                 if let Some(query_body) = query_body {
@@ -703,13 +722,16 @@ fn create_function(
                 has_body_parameter = true;
                 if required {
                     ts_request_builder.extend(quote! {
-                        req_builder = req_builder.json(#param_name_var);
+                        let req_body = bytes::Bytes::from_static(azure_core::EMPTY_BODY);
                     });
                 } else {
                     ts_request_builder.extend(quote! {
-                        if let Some(#param_name_var) = #param_name_var {
-                            req_builder = req_builder.json(#param_name_var);
-                        }
+                        let req_body =
+                            if let Some(#param_name_var) = #param_name_var {
+                                azure_core::to_json(#param_name_var).context(#fname::SerializeError)?
+                            } else {
+                                bytes::Bytes::from_static(azure_core::EMPTY_BODY)
+                            };
                     });
                 }
             }
@@ -729,10 +751,16 @@ fn create_function(
         }
     }
 
+    if !has_body_parameter {
+        ts_request_builder.extend(quote! {
+            let req_body = bytes::Bytes::from_static(azure_core::EMPTY_BODY);
+        });
+    }
+
     // if it is a post and there is no body, set the Content-Length to 0
     if is_post && !has_body_parameter {
         ts_request_builder.extend(quote! {
-            req_builder = req_builder.header(reqwest::header::CONTENT_LENGTH, 0);
+            req_builder = req_builder.header(http::header::CONTENT_LENGTH, 0);
         });
     }
 
@@ -781,7 +809,7 @@ fn create_function(
         };
         let response_type = &get_response_type_name(status_code);
         if response_type == "DefaultResponse" {
-            error_responses_ts.extend(quote! { DefaultResponse { status_code: StatusCode, #tp }, });
+            error_responses_ts.extend(quote! { DefaultResponse { status_code: http::StatusCode, #tp }, });
         } else {
             let response_type = ident(response_type).context(IdentError {
                 file: file!(),
@@ -791,7 +819,7 @@ fn create_function(
         }
     }
     if !has_default_response {
-        error_responses_ts.extend(quote! { UnexpectedResponse { status_code: StatusCode, body: bytes::Bytes }, });
+        error_responses_ts.extend(quote! { UnexpectedResponse { status_code: http::StatusCode, body: bytes::Bytes }, });
     }
 
     let mut match_status = TokenStream::new();
@@ -811,16 +839,16 @@ fn create_function(
                     match tp {
                         Some(tp) => {
                             match_status.extend(quote! {
-                                StatusCode::#status_code_name => {
-                                    let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
-                                    let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                http::StatusCode::#status_code_name => {
+                                    let rsp_body = rsp.body();
+                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
                                     Ok(rsp_value)
                                 }
                             });
                         }
                         None => {
                             match_status.extend(quote! {
-                                StatusCode::#status_code_name => {
+                                http::StatusCode::#status_code_name => {
                                     Ok(())
                                 }
                             });
@@ -830,16 +858,16 @@ fn create_function(
                     match tp {
                         Some(tp) => {
                             match_status.extend(quote! {
-                                StatusCode::#status_code_name => {
-                                    let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
-                                    let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                http::StatusCode::#status_code_name => {
+                                    let rsp_body = rsp.body();
+                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
                                     Ok(#fname::Response::#response_type_name(rsp_value))
                                 }
                             });
                         }
                         None => {
                             match_status.extend(quote! {
-                                StatusCode::#status_code_name => {
+                                http::StatusCode::#status_code_name => {
                                     Ok(#fname::Response::#response_type_name)
                                 }
                             });
@@ -865,16 +893,16 @@ fn create_function(
                 match tp {
                     Some(tp) => {
                         match_status.extend(quote! {
-                            StatusCode::#status_code_name => {
-                                let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
-                                let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                            http::StatusCode::#status_code_name => {
+                                let rsp_body = rsp.body();
+                                let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
                                 #fname::#response_type_name{value: rsp_value}.fail()
                             }
                         });
                     }
                     None => {
                         match_status.extend(quote! {
-                            StatusCode::#status_code_name => {
+                            http::StatusCode::#status_code_name => {
                                 #fname::#response_type_name{}.fail()
                             }
                         });
@@ -895,8 +923,8 @@ fn create_function(
                         Some(tp) => {
                             match_status.extend(quote! {
                                 status_code => {
-                                    let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
-                                    let rsp_value: #tp = serde_json::from_slice(&body).context(#fname::DeserializeError { body })?;
+                                    let rsp_body = rsp.body();
+                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
                                     #fname::DefaultResponse{status_code, value: rsp_value}.fail()
                                 }
                             });
@@ -915,27 +943,28 @@ fn create_function(
     } else {
         match_status.extend(quote! {
             status_code => {
-                let body: bytes::Bytes = rsp.bytes().await.context(#fname::ResponseBytesError)?;
-                #fname::UnexpectedResponse{status_code, body: body}.fail()
+                let rsp_body = rsp.body();
+                #fname::UnexpectedResponse{status_code, body: rsp_body.clone()}.fail()
             }
         });
     }
 
     let func = quote! {
         pub async fn #fname(#fparams) -> #fresponse {
-            let client = &operation_config.client;
-            let uri_str = &format!(#fpath, &operation_config.base_path, #uri_str_args);
-            let mut req_builder = #client_verb;
+            let http_client = operation_config.http_client();
+            let url_str = &format!(#fpath, operation_config.base_path(), #url_str_args);
+            let mut url = url::Url::parse(url_str).context(#fname::ParseUrlError)?;
+            let mut req_builder = http::request::Builder::new();
             #ts_request_builder
-            let req = req_builder.build().context(#fname::BuildRequestError)?;
-            let rsp = client.execute(req).await.context(#fname::ExecuteRequestError)?;
+            req_builder = req_builder.uri(url.as_str());
+            let req = req_builder.body(req_body).context(#fname::BuildRequestError)?;
+            let rsp = http_client.execute_request(req).await.context(#fname::ExecuteRequestError)?;
             match rsp.status() {
                 #match_status
             }
         }
         pub mod #fname {
             use crate::{models, models::*};
-            use reqwest::StatusCode;
             use snafu::Snafu;
 
             #response_enum
@@ -944,9 +973,10 @@ fn create_function(
             #[snafu(visibility(pub(crate)))]
             pub enum Error {
                 #error_responses_ts
-                BuildRequestError { source: reqwest::Error },
-                ExecuteRequestError { source: reqwest::Error },
-                ResponseBytesError { source: reqwest::Error },
+                ParseUrlError { source: url::ParseError },
+                BuildRequestError { source: http::Error },
+                ExecuteRequestError { source: Box<dyn std::error::Error + Sync + Send> },
+                SerializeError { source: Box<dyn std::error::Error + Sync + Send> },
                 DeserializeError { source: serde_json::Error, body: bytes::Bytes },
                 GetTokenError { source: azure_core::errors::AzureError },
             }
