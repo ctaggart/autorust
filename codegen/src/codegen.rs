@@ -722,7 +722,7 @@ fn create_function(
                 has_body_parameter = true;
                 if required {
                     ts_request_builder.extend(quote! {
-                        let req_body = bytes::Bytes::from_static(azure_core::EMPTY_BODY);
+                        let req_body = azure_core::to_json(#param_name_var).context(#fname::SerializeError)?;
                     });
                 } else {
                     ts_request_builder.extend(quote! {
