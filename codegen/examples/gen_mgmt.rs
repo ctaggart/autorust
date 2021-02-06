@@ -27,7 +27,8 @@ const SKIP_SERVICES: &[&str] = &[
     "powerplatform",              // https://github.com/Azure/azure-rest-api-specs/pull/11580 incorrect ref & duplicate Operations_List
     "service-map",                // Ident "Ref:machine"
     "servicefabric",              // https://github.com/Azure/azure-rest-api-specs/pull/11581 allOf mistakes and duplicate Operations_List
-    "web",                        // TODO #81 DataType::File
+    "servicefabricmanagedclusters",
+    "web", // TODO #81 DataType::File
 ];
 
 const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
@@ -49,6 +50,9 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("datamigration", "package-2017-11-15-preview"),
     ("compute", "package-2020-10-01-preview"),      // TODO #81 DataType::File
     ("compute", "package-2020-10-01-preview-only"), // TODO #81 DataType::File
+    ("authorization", "package-2018-05-01-preview"),
+    ("marketplace", "package-composite-v1"),
+    ("synapse", "package-2020-12-01"),
 ];
 
 // becuse of recursive types, some properties have to be boxed
