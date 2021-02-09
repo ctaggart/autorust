@@ -1,12 +1,11 @@
 use heck::CamelCase;
 use proc_macro2::TokenStream;
 use quote::ToTokens;
-use snafu::{ResultExt, Snafu};
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-#[derive(Debug, Snafu)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[snafu(display("ParseIdentError {} {}", text, source))]
+    #[error("ParseIdentError {} {}", text, source)]
     ParseIdentError { source: syn::Error, text: String },
 }
 
@@ -23,7 +22,10 @@ impl CamelCaseIdent for str {
         } else {
             txt.to_camel_case()
         };
-        let idt = syn::parse_str::<syn::Ident>(&txt).context(ParseIdentError { text: txt.to_owned() })?;
+        let idt = syn::parse_str::<syn::Ident>(&txt).map_err(|source| Error::ParseIdentError {
+            source,
+            text: txt.to_owned(),
+        })?;
         Ok(idt.into_token_stream())
     }
 }
@@ -33,7 +35,10 @@ pub fn ident(text: &str) -> Result<TokenStream> {
     txt = remove_spaces(&txt);
     txt = prefix_with_underscore_if_starts_with_number(&txt);
     txt = prefix_with_underscore_keywords(&txt);
-    let idt = syn::parse_str::<syn::Ident>(&txt).context(ParseIdentError { text: txt.to_owned() })?;
+    let idt = syn::parse_str::<syn::Ident>(&txt).map_err(|source| Error::ParseIdentError {
+        source,
+        text: txt.to_owned(),
+    })?;
     Ok(idt.into_token_stream())
 }
 

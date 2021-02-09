@@ -14,7 +14,6 @@ pub use self::{
 
 use config_parser::Configuration;
 use proc_macro2::TokenStream;
-use snafu::{OptionExt, ResultExt, Snafu};
 
 use std::{
     collections::HashSet,
@@ -25,41 +24,25 @@ use std::{
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[snafu(display("Could not create output directory {}: {}", directory.display(), source))]
-    CreateOutputDirectoryError {
-        directory: PathBuf,
-        source: std::io::Error,
-    },
-    #[snafu(display("Could not create file {}: {}", file.display(), source))]
-    CreateFileError {
-        file: PathBuf,
-        source: std::io::Error,
-    },
-    #[snafu(display("Could not write file {}: {}", file.display(), source))]
-    WriteFileError {
-        file: PathBuf,
-        source: std::io::Error,
-    },
-    CodeGenNewError {
-        source: codegen::Error,
-    },
-    #[snafu(display("CreateModelsError {} {}", config.output_folder.display(), source))]
-    CreateModelsError {
-        source: codegen::Error,
-        config: Config,
-    },
-    CreateOperationsError {
-        source: codegen::Error,
-    },
-    PathError {
-        source: path::Error,
-    },
-    IoError {
-        source: std::io::Error,
-    },
-    #[snafu(display("file name was not utf-8"))]
+    #[error("Could not create output directory {}: {}", directory.display(), source)]
+    CreateOutputDirectoryError { directory: PathBuf, source: std::io::Error },
+    #[error("Could not create file {}: {}", file.display(), source)]
+    CreateFileError { file: PathBuf, source: std::io::Error },
+    #[error("Could not write file {}: {}", file.display(), source)]
+    WriteFileError { file: PathBuf, source: std::io::Error },
+    #[error("CodeGenNewError")]
+    CodeGenNewError { source: codegen::Error },
+    #[error("CreateModelsError {} {}", config.output_folder.display(), source)]
+    CreateModelsError { source: codegen::Error, config: Config },
+    #[error("CreateOperationsError")]
+    CreateOperationsError { source: codegen::Error },
+    #[error("PathError")]
+    PathError { source: path::Error },
+    #[error("IoError")]
+    IoError { source: std::io::Error },
+    #[error("file name was not utf-8")]
     FileNameNotUtf8Error {},
 }
 
@@ -80,22 +63,28 @@ pub struct Config {
 
 pub fn run(config: Config) -> Result<()> {
     let directory = &config.output_folder;
-    fs::create_dir_all(directory).context(CreateOutputDirectoryError { directory })?;
-    let cg = &CodeGen::new(config.clone()).context(CodeGenNewError)?;
+    fs::create_dir_all(directory).map_err(|source| Error::CreateOutputDirectoryError {
+        source,
+        directory: directory.into(),
+    })?;
+    let cg = &CodeGen::new(config.clone()).map_err(|source| Error::CodeGenNewError { source })?;
 
     // create models from schemas
-    let models = cg.create_models().context(CreateModelsError { config: config.clone() })?;
-    let models_path = path::join(&config.output_folder, "models.rs").context(PathError)?;
+    let models = cg.create_models().map_err(|source| Error::CreateModelsError {
+        source,
+        config: config.clone(),
+    })?;
+    let models_path = path::join(&config.output_folder, "models.rs").map_err(|source| Error::PathError { source })?;
     write_file(&models_path, &models)?;
 
     // create api client from operations
-    let operations = cg.create_operations().context(CreateOperationsError)?;
-    let operations_path = path::join(&config.output_folder, "operations.rs").context(PathError)?;
+    let operations = cg.create_operations().map_err(|source| Error::CreateOperationsError { source })?;
+    let operations_path = path::join(&config.output_folder, "operations.rs").map_err(|source| Error::PathError { source })?;
     write_file(&operations_path, &operations)?;
 
     if let Some(api_version) = &config.api_version {
         let operations = create_mod(api_version);
-        let operations_path = path::join(&config.output_folder, "mod.rs").context(PathError)?;
+        let operations_path = path::join(&config.output_folder, "mod.rs").map_err(|source| Error::PathError { source })?;
         write_file(&operations_path, &operations)?;
     }
     Ok(())
@@ -105,8 +94,10 @@ fn write_file<P: AsRef<Path>>(file: P, tokens: &TokenStream) -> Result<()> {
     let file = file.as_ref();
     // println!("writing file {}", &file.display());
     let code = tokens.to_string();
-    let mut buffer = File::create(&file).context(CreateFileError { file: file.clone() })?;
-    buffer.write_all(&code.as_bytes()).context(WriteFileError { file })?;
+    let mut buffer = File::create(&file).map_err(|source| Error::CreateFileError { source, file: file.into() })?;
+    buffer
+        .write_all(&code.as_bytes())
+        .map_err(|source| Error::WriteFileError { source, file: file.into() })?;
     Ok(())
 }
 
@@ -114,13 +105,13 @@ const SPEC_FOLDER: &str = "../azure-rest-api-specs/specification";
 
 // gets a sorted list of folders in ../azure-rest-api-specs/specification
 fn get_spec_folders(spec_folder: &str) -> Result<Vec<String>, Error> {
-    let paths = fs::read_dir(spec_folder).context(IoError)?;
+    let paths = fs::read_dir(spec_folder).map_err(|source| Error::IoError { source })?;
     let mut spec_folders = Vec::new();
     for path in paths {
-        let path = path.context(IoError)?;
-        if path.file_type().context(IoError)?.is_dir() {
+        let path = path.map_err(|source| Error::IoError { source })?;
+        if path.file_type().map_err(|source| Error::IoError { source })?.is_dir() {
             let file_name = path.file_name();
-            let spec_folder = file_name.to_str().context(FileNameNotUtf8Error)?;
+            let spec_folder = file_name.to_str().map_or(Err(Error::FileNameNotUtf8Error {}), Ok)?;
             spec_folders.push(spec_folder.to_owned());
         }
     }

@@ -1,32 +1,33 @@
 use crate::{codegen::create_generated_by_header, identifier::ident, write_file};
 use proc_macro2::TokenStream;
 use quote::quote;
-use snafu::{ResultExt, Snafu};
+
 use std::path::Path;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("IdentModNameError")]
     IdentModNameError {
         source: crate::identifier::Error,
         feature_name: String,
         mod_name: String,
     },
-    WriteFileError {
-        source: crate::Error,
-    },
+    #[error("WriteFileError")]
+    WriteFileError { source: crate::Error },
 }
 
 pub fn create(feature_mod_names: &Vec<(String, String)>, path: &Path) -> Result<()> {
-    write_file(path, &create_body(feature_mod_names)?).context(WriteFileError)?;
+    write_file(path, &create_body(feature_mod_names)?).map_err(|source| Error::WriteFileError { source })?;
     Ok(())
 }
 
 fn create_body(feature_mod_names: &Vec<(String, String)>) -> Result<TokenStream> {
     let mut cfgs = TokenStream::new();
     for (feature_name, mod_name) in feature_mod_names {
-        let mod_name = ident(mod_name).context(IdentModNameError {
+        let mod_name = ident(mod_name).map_err(|source| Error::IdentModNameError {
+            source,
             feature_name: feature_name.to_owned(),
             mod_name: mod_name.to_owned(),
         })?;

@@ -1,5 +1,5 @@
 use crate::{
-    identifier::{ident, CamelCaseIdent},
+    identifier::{self, ident, CamelCaseIdent},
     spec,
     status_codes::{get_error_responses, get_response_type_name, get_status_code_name, get_success_responses, has_default_response},
     Config, OperationVerb, PropertyName, ResolvedSchema, Spec,
@@ -13,7 +13,6 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use regex::Regex;
 use serde_json::Value;
-use snafu::{OptionExt, ResultExt, Snafu};
 use spec::{get_schema_schema_references, openapi, RefKey};
 use std::{
     collections::HashSet,
@@ -28,7 +27,7 @@ pub struct CodeGen {
 
 impl CodeGen {
     pub fn new(config: Config) -> Result<Self> {
-        let spec = Spec::read_files(&config.input_files).context(SpecError)?;
+        let spec = Spec::read_files(&config.input_files).map_err(|source| Error::SpecError { source })?;
         Ok(Self { config, spec })
     }
 
@@ -56,7 +55,10 @@ impl CodeGen {
 
         // all definitions from input_files
         for (doc_file, doc) in self.spec.input_docs() {
-            let schemas = self.spec.resolve_schema_map(doc_file, &doc.definitions).context(SpecError)?;
+            let schemas = self
+                .spec
+                .resolve_schema_map(doc_file, &doc.definitions)
+                .map_err(|source| Error::SpecError { source })?;
             for (name, schema) in schemas {
                 all_schemas.insert(
                     RefKey {
@@ -109,7 +111,7 @@ impl CodeGen {
             #![allow(unused_variables)]
             #![allow(unused_imports)]
             use crate::models::*;
-            use snafu::{ResultExt, Snafu};
+
         });
         let param_re = Regex::new(r"\{(\w+)\}").unwrap();
         let mut modules: IndexMap<Option<String>, TokenStream> = IndexMap::new();
@@ -118,7 +120,10 @@ impl CodeGen {
             // only operations from listed input files
             // println!("doc_file {:?}", doc_file);
             if self.spec.is_input_file(&doc_file) {
-                let paths = self.spec.resolve_path_map(doc_file, &doc.paths).context(SpecError)?;
+                let paths = self
+                    .spec
+                    .resolve_path_map(doc_file, &doc.paths)
+                    .map_err(|source| Error::SpecError { source })?;
                 for (path, item) in &paths {
                     for op in spec::path_item_operations(item) {
                         let (module_name, function_name) = op.function_name(path);
@@ -141,14 +146,15 @@ impl CodeGen {
         for (module_name, module) in modules {
             match module_name {
                 Some(module_name) => {
-                    let name = ident(&module_name).context(IdentError {
+                    let name = ident(&module_name).map_err(|source| Error::IdentError {
+                        source,
                         file: file!(),
                         line: line!(),
                     })?;
                     file.extend(quote! {
                         pub mod #name {
                             use crate::models::*;
-                            use snafu::{ResultExt, Snafu};
+
                             #module
                         }
                     });
@@ -163,7 +169,10 @@ impl CodeGen {
 
     // For create_models. Recursively adds schema refs.
     fn add_schema_refs(&self, schemas: &mut IndexMap<RefKey, ResolvedSchema>, doc_file: &Path, schema_ref: Reference) -> Result<()> {
-        let schema = self.spec.resolve_schema_ref(doc_file, schema_ref).context(SpecError)?;
+        let schema = self
+            .spec
+            .resolve_schema_ref(doc_file, schema_ref)
+            .map_err(|source| Error::SpecError { source })?;
         if let Some(ref_key) = schema.ref_key.clone() {
             if !schemas.contains_key(&ref_key) {
                 if !self.spec.is_input_file(&ref_key.file_path) {
@@ -180,7 +189,8 @@ impl CodeGen {
 
     fn create_vec_alias(&self, _doc_file: &Path, alias_name: &str, schema: &ResolvedSchema) -> Result<TokenStream> {
         let items = get_schema_array_items(&schema.schema.common)?;
-        let typ = ident(&alias_name.to_camel_case()).context(IdentError {
+        let typ = ident(&alias_name.to_camel_case()).map_err(|source| Error::IdentError {
+            source,
             file: file!(),
             line: line!(),
         })?;
@@ -193,11 +203,13 @@ impl CodeGen {
         let mut streams = Vec::new();
         let mut local_types = Vec::new();
         let mut props = TokenStream::new();
-        let ns = ident(&struct_name.to_snake_case()).context(IdentError {
+        let ns = ident(&struct_name.to_snake_case()).map_err(|source| Error::IdentError {
+            source,
             file: file!(),
             line: line!(),
         })?;
-        let nm = ident(&struct_name.to_camel_case()).context(IdentError {
+        let nm = ident(&struct_name.to_camel_case()).map_err(|source| Error::IdentError {
+            source,
             file: file!(),
             line: line!(),
         })?;
@@ -205,7 +217,8 @@ impl CodeGen {
 
         for schema in &schema.schema.all_of {
             let type_name = get_type_name_for_schema_ref(schema, AsReference::False)?;
-            let field_name = ident(&type_name.to_string().to_snake_case()).context(IdentError {
+            let field_name = ident(&type_name.to_string().to_snake_case()).map_err(|source| Error::IdentError {
+                source,
                 file: file!(),
                 line: line!(),
             })?;
@@ -218,9 +231,10 @@ impl CodeGen {
         let properties = self
             .spec
             .resolve_schema_map(doc_file, &schema.schema.properties)
-            .context(SpecError)?;
+            .map_err(|source| Error::SpecError { source })?;
         for (property_name, property) in &properties {
-            let nm = ident(&property_name.to_snake_case()).context(IdentError {
+            let nm = ident(&property_name.to_snake_case()).map_err(|source| Error::IdentError {
+                source,
                 file: file!(),
                 line: line!(),
             })?;
@@ -300,7 +314,8 @@ impl CodeGen {
     ) -> Result<(TokenStream, Vec<TokenStream>)> {
         match &property.ref_key {
             Some(ref_key) => {
-                let tp = ident(&ref_key.name.to_camel_case()).context(IdentError {
+                let tp = ident(&ref_key.name.to_camel_case()).map_err(|source| Error::IdentError {
+                    source,
                     file: file!(),
                     line: line!(),
                 })?;
@@ -311,7 +326,8 @@ impl CodeGen {
                     let (tp_name, tp) = create_enum(namespace, property_name, property)?;
                     Ok((tp_name, vec![tp]))
                 } else if is_local_struct(property) {
-                    let id = ident(&property_name.to_camel_case()).context(IdentError {
+                    let id = ident(&property_name.to_camel_case()).map_err(|source| Error::IdentError {
+                        source,
                         file: file!(),
                         line: line!(),
                     })?;
@@ -328,23 +344,23 @@ impl CodeGen {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-#[derive(Debug, Snafu)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    SpecError {
-        source: spec::Error,
-    },
+    #[error("SpecError")]
+    SpecError { source: spec::Error },
+    #[error("ArrayExpectedToHaveItems")]
     ArrayExpectedToHaveItems,
+    #[error("NoNameForRef")]
     NoNameForRef,
-    #[snafu(display("IdentError at {}:{} {} ", file, line, source))]
+    #[error("IdentError at {}:{} {} ", file, line, source)]
     IdentError {
         source: crate::identifier::Error,
         file: &'static str,
         line: u32,
     },
-    #[snafu(display("CreateEnumIdentError {} {} {}", property_name, enum_value, source))]
+    #[error("CreateEnumIdentError {} {}", property_name, enum_value)]
     CreateEnumIdentError {
-        #[snafu(source(from(Error, Box::new)))]
-        source: Box<Error>,
+        source: identifier::Error,
         property_name: String,
         enum_value: String,
     },
@@ -370,7 +386,7 @@ fn is_string(schema: &SchemaCommon) -> bool {
 }
 
 fn get_schema_array_items(schema: &SchemaCommon) -> Result<&ReferenceOr<Schema>> {
-    Ok(schema.items.as_ref().as_ref().context(ArrayExpectedToHaveItems)?)
+    Ok(schema.items.as_ref().as_ref().map_or(Err(Error::ArrayExpectedToHaveItems), Ok)?)
 }
 
 pub fn create_generated_by_header() -> TokenStream {
@@ -389,22 +405,18 @@ fn is_local_struct(property: &ResolvedSchema) -> bool {
 
 fn create_enum(namespace: &TokenStream, property_name: &str, property: &ResolvedSchema) -> Result<(TokenStream, TokenStream)> {
     let enum_values = enum_values_as_strings(&property.schema.common.enum_);
-    let id = ident(&property_name.to_camel_case()).context(IdentError {
+    let id = ident(&property_name.to_camel_case()).map_err(|source| Error::IdentError {
+        source,
         file: file!(),
         line: line!(),
     })?;
     let mut values = TokenStream::new();
     for name in enum_values {
-        let nm = name
-            .to_camel_case_ident()
-            .context(IdentError {
-                file: file!(),
-                line: line!(),
-            })
-            .context(CreateEnumIdentError {
-                property_name: property_name.to_owned(),
-                enum_value: name.to_owned(),
-            })?;
+        let nm = name.to_camel_case_ident().map_err(|source| Error::CreateEnumIdentError {
+            source,
+            property_name: property_name.to_owned(),
+            enum_value: name.to_owned(),
+        })?;
         let rename = if &nm.to_string() == name {
             quote! {}
         } else {
@@ -416,7 +428,8 @@ fn create_enum(namespace: &TokenStream, property_name: &str, property: &Resolved
         };
         values.extend(value);
     }
-    let nm = ident(&property_name.to_camel_case()).context(IdentError {
+    let nm = ident(&property_name.to_camel_case()).map_err(|source| Error::IdentError {
+        source,
         file: file!(),
         line: line!(),
     })?;
@@ -464,7 +477,8 @@ fn get_param_type(param: &Parameter) -> Result<TokenStream> {
 }
 
 fn get_param_name(param: &Parameter) -> Result<TokenStream> {
-    ident(&param.name.to_snake_case()).context(IdentError {
+    ident(&param.name.to_snake_case()).map_err(|source| Error::IdentError {
+        source,
         file: file!(),
         line: line!(),
     })
@@ -544,8 +558,9 @@ fn get_type_name_for_schema(schema: &SchemaCommon, as_ref: AsReference) -> Resul
 fn get_type_name_for_schema_ref(schema: &ReferenceOr<Schema>, as_ref: AsReference) -> Result<TokenStream> {
     match schema {
         ReferenceOr::Reference { reference, .. } => {
-            let name = &reference.name.as_ref().context(NoNameForRef)?;
-            let idt = ident(&name.to_camel_case()).context(IdentError {
+            let name = &reference.name.as_ref().map_or(Err(Error::NoNameForRef), Ok)?;
+            let idt = ident(&name.to_camel_case()).map_err(|source| Error::IdentError {
+                source,
                 file: file!(),
                 line: line!(),
             })?;
@@ -575,7 +590,8 @@ fn create_function(
     param_re: &Regex,
     function_name: &str,
 ) -> Result<TokenStream> {
-    let fname = ident(function_name).context(IdentError {
+    let fname = ident(function_name).map_err(|source| Error::IdentError {
+        source,
         file: file!(),
         line: line!(),
     })?;
@@ -585,7 +601,8 @@ fn create_function(
     let params: Result<Vec<_>> = params
         .iter()
         .map(|s| {
-            Ok(ident(&s.to_snake_case()).context(IdentError {
+            Ok(ident(&s.to_snake_case()).map_err(|source| Error::IdentError {
+                source,
                 file: file!(),
                 line: line!(),
             })?)
@@ -599,7 +616,7 @@ fn create_function(
     let parameters: Vec<Parameter> = cg
         .spec
         .resolve_parameters(doc_file, &operation_verb.operation().parameters)
-        .context(SpecError)?;
+        .map_err(|source| Error::SpecError { source })?;
     let param_names: HashSet<_> = parameters.iter().map(|p| p.name.as_str()).collect();
     let has_param_api_version = param_names.contains("api-version");
     let mut skip = HashSet::new();
@@ -635,7 +652,7 @@ fn create_function(
         if let Some(token_credential) = operation_config.token_credential() {
             let token_response = token_credential
                 .get_token(operation_config.token_credential_resource()).await
-                .context(#fname::GetTokenError)?;
+                .map_err(|source| #fname::Error::GetTokenError{source})?;
             req_builder = req_builder.header(http::header::AUTHORIZATION, format!("Bearer {}", token_response.token.secret()));
         }
     });
@@ -722,13 +739,13 @@ fn create_function(
                 has_body_parameter = true;
                 if required {
                     ts_request_builder.extend(quote! {
-                        let req_body = azure_core::to_json(#param_name_var).context(#fname::SerializeError)?;
+                        let req_body = azure_core::to_json(#param_name_var).map_err(|source| #fname::Error::SerializeError{source})?;
                     });
                 } else {
                     ts_request_builder.extend(quote! {
                         let req_body =
                             if let Some(#param_name_var) = #param_name_var {
-                                azure_core::to_json(#param_name_var).context(#fname::SerializeError)?
+                                azure_core::to_json(#param_name_var).map_err(|source| #fname::Error::SerializeError{source})?
                             } else {
                                 bytes::Bytes::from_static(azure_core::EMPTY_BODY)
                             };
@@ -786,7 +803,8 @@ fn create_function(
                 Some(tp) => quote! { (#tp) },
                 None => quote! {},
             };
-            let enum_type_name = ident(&get_response_type_name(status_code)).context(IdentError {
+            let enum_type_name = ident(&get_response_type_name(status_code)).map_err(|source| Error::IdentError {
+                source,
                 file: file!(),
                 line: line!(),
             })?;
@@ -809,9 +827,13 @@ fn create_function(
         };
         let response_type = &get_response_type_name(status_code);
         if response_type == "DefaultResponse" {
-            error_responses_ts.extend(quote! { DefaultResponse { status_code: http::StatusCode, #tp }, });
+            error_responses_ts.extend(quote! {
+                #[error("DefaultResponse")]
+                DefaultResponse { status_code: http::StatusCode, #tp },
+            });
         } else {
-            let response_type = ident(response_type).context(IdentError {
+            let response_type = ident(response_type).map_err(|source| Error::IdentError {
+                source,
                 file: file!(),
                 line: line!(),
             })?;
@@ -819,7 +841,10 @@ fn create_function(
         }
     }
     if !has_default_response {
-        error_responses_ts.extend(quote! { UnexpectedResponse { status_code: http::StatusCode, body: bytes::Bytes }, });
+        error_responses_ts.extend(quote! {
+            #[error("UnexpectedResponse")]
+            UnexpectedResponse { status_code: http::StatusCode, body: bytes::Bytes },
+        });
     }
 
     let mut match_status = TokenStream::new();
@@ -827,11 +852,13 @@ fn create_function(
         match status_code {
             autorust_openapi::StatusCode::Code(_) => {
                 let tp = create_response_type(rsp)?;
-                let status_code_name = ident(&get_status_code_name(status_code)).context(IdentError {
+                let status_code_name = ident(&get_status_code_name(status_code)).map_err(|source| Error::IdentError {
+                    source,
                     file: file!(),
                     line: line!(),
                 })?;
-                let response_type_name = ident(&get_response_type_name(status_code)).context(IdentError {
+                let response_type_name = ident(&get_response_type_name(status_code)).map_err(|source| Error::IdentError {
+                    source,
                     file: file!(),
                     line: line!(),
                 })?;
@@ -841,7 +868,7 @@ fn create_function(
                             match_status.extend(quote! {
                                 http::StatusCode::#status_code_name => {
                                     let rsp_body = rsp.body();
-                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
+                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).map_err(|source| #fname::Error::DeserializeError { source, body: rsp_body.clone() })?;
                                     Ok(rsp_value)
                                 }
                             });
@@ -860,7 +887,7 @@ fn create_function(
                             match_status.extend(quote! {
                                 http::StatusCode::#status_code_name => {
                                     let rsp_body = rsp.body();
-                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
+                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).map_err(|source| #fname::Error::DeserializeError { source, body: rsp_body.clone() })?;
                                     Ok(#fname::Response::#response_type_name(rsp_value))
                                 }
                             });
@@ -882,11 +909,13 @@ fn create_function(
         match status_code {
             autorust_openapi::StatusCode::Code(_) => {
                 let tp = create_response_type(rsp)?;
-                let status_code_name = ident(&get_status_code_name(status_code)).context(IdentError {
+                let status_code_name = ident(&get_status_code_name(status_code)).map_err(|source| Error::IdentError {
+                    source,
                     file: file!(),
                     line: line!(),
                 })?;
-                let response_type_name = ident(&get_response_type_name(status_code)).context(IdentError {
+                let response_type_name = ident(&get_response_type_name(status_code)).map_err(|source| Error::IdentError {
+                    source,
                     file: file!(),
                     line: line!(),
                 })?;
@@ -895,15 +924,15 @@ fn create_function(
                         match_status.extend(quote! {
                             http::StatusCode::#status_code_name => {
                                 let rsp_body = rsp.body();
-                                let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
-                                #fname::#response_type_name{value: rsp_value}.fail()
+                                let rsp_value: #tp = serde_json::from_slice(rsp_body).map_err(|source| #fname::Error::DeserializeError { source, body: rsp_body.clone() })?;
+                                Err(#fname::Error::#response_type_name{value: rsp_value})
                             }
                         });
                     }
                     None => {
                         match_status.extend(quote! {
                             http::StatusCode::#status_code_name => {
-                                #fname::#response_type_name{}.fail()
+                                Err(#fname::Error::#response_type_name{})
                             }
                         });
                     }
@@ -924,15 +953,15 @@ fn create_function(
                             match_status.extend(quote! {
                                 status_code => {
                                     let rsp_body = rsp.body();
-                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).context(#fname::DeserializeError { body: rsp_body.clone() })?;
-                                    #fname::DefaultResponse{status_code, value: rsp_value}.fail()
+                                    let rsp_value: #tp = serde_json::from_slice(rsp_body).map_err(|source| #fname::Error::DeserializeError { source, body: rsp_body.clone() })?;
+                                    Err(#fname::Error::DefaultResponse{status_code, value: rsp_value})
                                 }
                             });
                         }
                         None => {
                             match_status.extend(quote! {
                                 status_code => {
-                                    #fname::DefaultResponse{status_code}.fail()
+                                    Err(#fname::Error::DefaultResponse{status_code})
                                 }
                             });
                         }
@@ -944,7 +973,7 @@ fn create_function(
         match_status.extend(quote! {
             status_code => {
                 let rsp_body = rsp.body();
-                #fname::UnexpectedResponse{status_code, body: rsp_body.clone()}.fail()
+                Err(#fname::Error::UnexpectedResponse{status_code, body: rsp_body.clone()})
             }
         });
     }
@@ -953,31 +982,35 @@ fn create_function(
         pub async fn #fname(#fparams) -> #fresponse {
             let http_client = operation_config.http_client();
             let url_str = &format!(#fpath, operation_config.base_path(), #url_str_args);
-            let mut url = url::Url::parse(url_str).context(#fname::ParseUrlError)?;
+            let mut url = url::Url::parse(url_str).map_err(|source| #fname::Error::ParseUrlError{source})?;
             let mut req_builder = http::request::Builder::new();
             #ts_request_builder
             req_builder = req_builder.uri(url.as_str());
-            let req = req_builder.body(req_body).context(#fname::BuildRequestError)?;
-            let rsp = http_client.execute_request(req).await.context(#fname::ExecuteRequestError)?;
+            let req = req_builder.body(req_body).map_err(|source| #fname::Error::BuildRequestError{source})?;
+            let rsp = http_client.execute_request(req).await.map_err(|source| #fname::Error::ExecuteRequestError{source})?;
             match rsp.status() {
                 #match_status
             }
         }
         pub mod #fname {
             use crate::{models, models::*};
-            use snafu::Snafu;
 
             #response_enum
 
-            #[derive(Debug, Snafu)]
-            #[snafu(visibility(pub(crate)))]
+            #[derive(Debug, thiserror::Error)]
             pub enum Error {
                 #error_responses_ts
+                #[error("ParseUrlError")]
                 ParseUrlError { source: url::ParseError },
+                #[error("BuildRequestError")]
                 BuildRequestError { source: http::Error },
+                #[error("ExecuteRequestError")]
                 ExecuteRequestError { source: Box<dyn std::error::Error + Sync + Send> },
+                #[error("SerializeError")]
                 SerializeError { source: Box<dyn std::error::Error + Sync + Send> },
+                #[error("DeserializeError")]
                 DeserializeError { source: serde_json::Error, body: bytes::Bytes },
+                #[error("GetTokenError")]
                 GetTokenError { source: azure_core::errors::AzureError },
             }
         }

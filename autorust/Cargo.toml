@@ -7,4 +7,4 @@ edition = "2018"
 [dependencies]
 autorust_codegen = { path = "../codegen" }
 clap = "3.0.0-beta.2"
-snafu = "0.6"
+thiserror = "1.0"

@@ -1,11 +1,13 @@
 use path_abs::PathMut;
-use snafu::{ResultExt, Snafu};
+
 use std::path::{Path, PathBuf};
 
 type Result<T, E = Error> = std::result::Result<T, E>;
-#[derive(Debug, Snafu)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("PopUpPath")]
     PopUpPath { source: path_abs::Error },
+    #[error("AppendPath")]
     AppendPath { source: path_abs::Error },
 }
 
@@ -16,9 +18,9 @@ pub enum Error {
 pub fn join<P1: AsRef<Path>, P2: AsRef<Path>>(a: P1, b: P2) -> Result<PathBuf> {
     let mut c = PathBuf::from(a.as_ref());
     if c.extension().is_some() {
-        c.pop_up().context(PopUpPath)?; // to directory
+        c.pop_up().map_err(|source| Error::PopUpPath { source })?; // to directory
     }
-    c.append(&b).context(AppendPath)?;
+    c.append(&b).map_err(|source| Error::AppendPath { source })?;
     Ok(c)
 }
 

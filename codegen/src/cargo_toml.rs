@@ -1,4 +1,3 @@
-use snafu::{ResultExt, Snafu};
 use std::{
     fs::File,
     io::{prelude::*, LineWriter},
@@ -6,13 +5,14 @@ use std::{
 };
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-#[derive(Debug, Snafu)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("IoError")]
     IoError { source: std::io::Error },
 }
 
 pub fn create(crate_name: &str, feature_mod_names: &Vec<(String, String)>, path: &Path) -> Result<()> {
-    let file = File::create(path).context(IoError)?;
+    let file = File::create(path).map_err(|source| Error::IoError { source })?;
     let mut file = LineWriter::new(file);
     let version = &env!("CARGO_PKG_VERSION");
     file.write_all(
@@ -29,7 +29,7 @@ serde = {{ version = "1.0", features = ["derive"] }}
 serde_json = "1.0"
 reqwest = {{ version = "0.11", features = ["json"] }}
 bytes = "1.0"
-snafu = "0.6"
+thiserror = "1.0"
 http = "0.2"
 url = "2.2"
 
@@ -43,14 +43,15 @@ tokio = {{ version = "1.0", features = ["macros"] }}
         )
         .as_bytes(),
     )
-    .context(IoError)?;
+    .map_err(|source| Error::IoError { source })?;
 
     let default = get_default_feature(feature_mod_names);
     file.write_all(format!("default = [\"{}\"]\n", default).as_bytes())
-        .context(IoError)?;
+        .map_err(|source| Error::IoError { source })?;
 
     for (feature_name, _mod_name) in feature_mod_names {
-        file.write_all(format!("\"{}\" = []\n", feature_name).as_bytes()).context(IoError)?;
+        file.write_all(format!("\"{}\" = []\n", feature_name).as_bytes())
+            .map_err(|source| Error::IoError { source })?;
     }
     Ok(())
 }
