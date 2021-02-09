@@ -837,7 +837,10 @@ fn create_function(
                 file: file!(),
                 line: line!(),
             })?;
-            error_responses_ts.extend(quote! { #response_type { #tp }, });
+            error_responses_ts.extend(quote! {
+                #[error("#response_type")]
+                #response_type { #tp },
+            });
         }
     }
     if !has_default_response {

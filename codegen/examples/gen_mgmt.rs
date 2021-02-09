@@ -15,7 +15,6 @@ const ONLY_SERVICES: &[&str] = &[
     // "vmware",
     // "network",
     // "cosmos-db",
-    "search",
 ];
 
 const SKIP_SERVICES: &[&str] = &[
