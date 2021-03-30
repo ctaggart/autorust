@@ -828,7 +828,7 @@ fn create_function(
         let response_type = &get_response_type_name(status_code);
         if response_type == "DefaultResponse" {
             error_responses_ts.extend(quote! {
-                #[error("DefaultResponse")]
+                #[error("HTTP status code {}", status_code)]
                 DefaultResponse { status_code: http::StatusCode, #tp },
             });
         } else {
@@ -838,14 +838,14 @@ fn create_function(
                 line: line!(),
             })?;
             error_responses_ts.extend(quote! {
-                #[error("#response_type")]
+                #[error("Error response #response_type")]
                 #response_type { #tp },
             });
         }
     }
     if !has_default_response {
         error_responses_ts.extend(quote! {
-            #[error("UnexpectedResponse")]
+            #[error("Unexpected HTTP status code {}", status_code)]
             UnexpectedResponse { status_code: http::StatusCode, body: bytes::Bytes },
         });
     }
@@ -1003,17 +1003,17 @@ fn create_function(
             #[derive(Debug, thiserror::Error)]
             pub enum Error {
                 #error_responses_ts
-                #[error("ParseUrlError")]
+                #[error("Failed to parse request URL: {}", source)]
                 ParseUrlError { source: url::ParseError },
-                #[error("BuildRequestError")]
+                #[error("Failed to build request: {}", source)]
                 BuildRequestError { source: http::Error },
-                #[error("ExecuteRequestError")]
+                #[error("Failed to execute request: {}", source)]
                 ExecuteRequestError { source: Box<dyn std::error::Error + Sync + Send> },
-                #[error("SerializeError")]
+                #[error("Failed to serialize request body: {}", source)]
                 SerializeError { source: Box<dyn std::error::Error + Sync + Send> },
-                #[error("DeserializeError")]
+                #[error("Failed to deserialize response body: {}", source)]
                 DeserializeError { source: serde_json::Error, body: bytes::Bytes },
-                #[error("GetTokenError")]
+                #[error("Failed to get access token: {}", source)]
                 GetTokenError { source: azure_core::errors::AzureError },
             }
         }
