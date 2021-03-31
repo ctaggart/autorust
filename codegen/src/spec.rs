@@ -2,7 +2,6 @@ use crate::path;
 use autorust_openapi::{AdditionalProperties, OpenAPI, Operation, Parameter, PathItem, Reference, ReferenceOr, Schema};
 use heck::SnakeCase;
 use indexmap::{IndexMap, IndexSet};
-use snafu::{OptionExt, ResultExt, Snafu};
 use std::{
     ffi::OsStr,
     fs,
@@ -69,7 +68,7 @@ impl Spec {
             let ref_files = openapi::get_reference_file_paths(&doc);
             docs.insert(PathBuf::from(file_path), doc);
             for ref_file in ref_files {
-                let child_path = path::join(&file_path, &ref_file).context(PathJoin)?;
+                let child_path = path::join(&file_path, &ref_file).map_err(|source| Error::PathJoin { source })?;
                 Spec::read_file(docs, &child_path)?;
             }
         }
@@ -93,7 +92,7 @@ impl Spec {
         let doc_path = doc_path.as_ref();
         let full_path = match reference.file {
             None => doc_path.to_owned(),
-            Some(file) => path::join(doc_path, &file).context(PathJoin)?,
+            Some(file) => path::join(doc_path, &file).map_err(|source| Error::PathJoin { source })?,
         };
 
         let name = reference.name.ok_or_else(|| Error::NoNameInReference)?;
@@ -104,7 +103,7 @@ impl Spec {
         let schema = self
             .schemas
             .get(&ref_key)
-            .context(SchemaNotFound { ref_key: ref_key.clone() })?
+            .map_or(Err(Error::SchemaNotFound { ref_key: ref_key.clone() }), Ok)?
             .clone();
         Ok(ResolvedSchema {
             ref_key: Some(ref_key),
@@ -117,14 +116,18 @@ impl Spec {
         let doc_path = doc_path.as_ref();
         let full_path = match reference.file {
             None => doc_path.to_owned(),
-            Some(file) => path::join(doc_path, &file).context(PathJoin)?,
+            Some(file) => path::join(doc_path, &file).map_err(|source| Error::PathJoin { source })?,
         };
         let name = reference.name.ok_or_else(|| Error::NoNameInReference)?;
         let ref_key = RefKey {
             file_path: full_path,
             name,
         };
-        Ok(self.parameters.get(&ref_key).context(ParameterNotFound { ref_key })?.clone())
+        Ok(self
+            .parameters
+            .get(&ref_key)
+            .map_or(Err(Error::ParameterNotFound { ref_key }), Ok)?
+            .clone())
     }
 
     /// Resolve a reference or schema to a resolved schema
@@ -166,7 +169,7 @@ impl Spec {
             ReferenceOr::Reference { .. } => {
                 // self.resolve_path_ref(doc_file, reference),
                 // TODO
-                NotImplemented.fail()
+                Err(Error::NotImplemented)
             }
         }
     }
@@ -197,32 +200,24 @@ impl Spec {
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    PathJoin {
-        source: path::Error,
-    },
-    #[snafu(display("SchemaNotFound {} {}", ref_key.file_path.display(), ref_key.name))]
-    SchemaNotFound {
-        ref_key: RefKey,
-    },
+    #[error("PathJoin")]
+    PathJoin { source: path::Error },
+    #[error("SchemaNotFound {} {}", ref_key.file_path.display(), ref_key.name)]
+    SchemaNotFound { ref_key: RefKey },
+    #[error("NoNameInReference")]
     NoNameInReference,
-    ParameterNotFound {
-        ref_key: RefKey,
-    },
+    #[error("ParameterNotFound")]
+    ParameterNotFound { ref_key: RefKey },
+    #[error("NotImplemented")]
     NotImplemented,
-    ReadFile {
-        source: std::io::Error,
-        path: PathBuf,
-    },
-    DeserializeYaml {
-        source: serde_yaml::Error,
-        path: PathBuf,
-    },
-    DeserializeJson {
-        source: serde_json::Error,
-        path: PathBuf,
-    },
+    #[error("ReadFile")]
+    ReadFile { source: std::io::Error, path: PathBuf },
+    #[error("DeserializeYaml")]
+    DeserializeYaml { source: serde_yaml::Error, path: PathBuf },
+    #[error("DeserializeJson")]
+    DeserializeJson { source: serde_json::Error, path: PathBuf },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -243,11 +238,20 @@ pub mod openapi {
     /// Parse an OpenAPI object from a file located at `path`
     pub fn parse<P: AsRef<Path>>(path: P) -> Result<OpenAPI> {
         let path = path.as_ref();
-        let bytes = fs::read(path).context(ReadFile { path: PathBuf::from(path) })?;
+        let bytes = fs::read(path).map_err(|source| Error::ReadFile {
+            source,
+            path: PathBuf::from(path),
+        })?;
         let api = if path.extension() == Some(OsStr::new("yaml")) || path.extension() == Some(OsStr::new("yml")) {
-            serde_yaml::from_slice(&bytes).context(DeserializeYaml { path: PathBuf::from(path) })?
+            serde_yaml::from_slice(&bytes).map_err(|source| Error::DeserializeYaml {
+                source,
+                path: PathBuf::from(path),
+            })?
         } else {
-            serde_json::from_slice(&bytes).context(DeserializeJson { path: PathBuf::from(path) })?
+            serde_json::from_slice(&bytes).map_err(|source| Error::DeserializeJson {
+                source,
+                path: PathBuf::from(path),
+            })?
         };
 
         Ok(api)

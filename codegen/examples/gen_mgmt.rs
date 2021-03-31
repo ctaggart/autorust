@@ -6,7 +6,7 @@ use autorust_codegen::{
     get_mgmt_configs, lib_rs, path, Config, PropertyName, SpecConfigs,
 };
 use heck::SnakeCase;
-use snafu::{ResultExt, Snafu};
+
 use std::{collections::HashSet, fs, path::PathBuf};
 
 const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
@@ -78,32 +78,30 @@ const BOX_PROPERTIES: &[(&str, &str, &str)] = &[
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[snafu(display("file name was not utf-8"))]
+    #[error("file name was not utf-8")]
     FileNameNotUtf8Error {},
-    IoError {
-        source: std::io::Error,
-    },
-    PathError {
-        source: path::Error,
-    },
-    CodegenError {
-        source: autorust_codegen::Error,
-    },
-    CargoTomlError {
-        source: cargo_toml::Error,
-    },
-    LibRsError {
-        source: lib_rs::Error,
-    },
-    GetSpecFoldersError {
-        source: autorust_codegen::Error,
-    },
+    #[error("IoError")]
+    IoError { source: std::io::Error },
+    #[error("PathError")]
+    PathError { source: path::Error },
+    #[error("CodegenError")]
+    CodegenError { source: autorust_codegen::Error },
+    #[error("CargoTomlError")]
+    CargoTomlError { source: cargo_toml::Error },
+    #[error("LibRsError")]
+    LibRsError { source: lib_rs::Error },
+    #[error("GetSpecFoldersError")]
+    GetSpecFoldersError { source: autorust_codegen::Error },
 }
 
 fn main() -> Result<()> {
-    for (i, spec) in get_mgmt_configs().context(GetSpecFoldersError)?.iter().enumerate() {
+    for (i, spec) in get_mgmt_configs()
+        .map_err(|source| Error::GetSpecFoldersError { source })?
+        .iter()
+        .enumerate()
+    {
         if ONLY_SERVICES.len() > 0 {
             if ONLY_SERVICES.contains(&spec.spec()) {
                 println!("{} {}", i + 1, spec.spec());
@@ -122,11 +120,11 @@ fn main() -> Result<()> {
 fn gen_crate(spec: &SpecConfigs) -> Result<()> {
     let service_name = &get_service_name(spec.spec());
     let crate_name = &format!("azure_mgmt_{}", service_name);
-    let output_folder = &path::join(OUTPUT_FOLDER, service_name).context(PathError)?;
+    let output_folder = &path::join(OUTPUT_FOLDER, service_name).map_err(|source| Error::PathError { source })?;
 
-    let src_folder = path::join(output_folder, "src").context(PathError)?;
+    let src_folder = path::join(output_folder, "src").map_err(|source| Error::PathError { source })?;
     if src_folder.exists() {
-        fs::remove_dir_all(&src_folder).context(IoError)?;
+        fs::remove_dir_all(&src_folder).map_err(|source| Error::IoError { source })?;
     }
 
     let mut feature_mod_names = Vec::new();
@@ -153,7 +151,7 @@ fn gen_crate(spec: &SpecConfigs) -> Result<()> {
             let mod_name = &to_mod_name(tag);
             feature_mod_names.push((tag.to_string(), mod_name.clone()));
             // println!("  {}", mod_name);
-            let mod_output_folder = path::join(&src_folder, mod_name).context(PathError)?;
+            let mod_output_folder = path::join(&src_folder, mod_name).map_err(|source| Error::PathError { source })?;
             // println!("  {:?}", mod_output_folder);
             // for input_file in &config.input_files {
             //     println!("  {}", input_file);
@@ -161,7 +159,7 @@ fn gen_crate(spec: &SpecConfigs) -> Result<()> {
             let input_files: Result<Vec<_>> = config
                 .input_files
                 .iter()
-                .map(|input_file| Ok(path::join(spec.readme(), input_file).context(PathError)?))
+                .map(|input_file| Ok(path::join(spec.readme(), input_file).map_err(|source| Error::PathError { source })?))
                 .collect();
             let input_files = input_files?;
             // for input_file in &input_files {
@@ -173,7 +171,7 @@ fn gen_crate(spec: &SpecConfigs) -> Result<()> {
                 input_files,
                 box_properties: box_properties.clone(),
             })
-            .context(CodegenError)?;
+            .map_err(|source| Error::CodegenError { source })?;
         }
     }
     if feature_mod_names.len() == 0 {
@@ -182,10 +180,14 @@ fn gen_crate(spec: &SpecConfigs) -> Result<()> {
     cargo_toml::create(
         crate_name,
         &feature_mod_names,
-        &path::join(output_folder, "Cargo.toml").context(PathError)?,
+        &path::join(output_folder, "Cargo.toml").map_err(|source| Error::PathError { source })?,
     )
-    .context(CargoTomlError)?;
-    lib_rs::create(&feature_mod_names, &path::join(src_folder, "lib.rs").context(PathError)?).context(LibRsError)?;
+    .map_err(|source| Error::CargoTomlError { source })?;
+    lib_rs::create(
+        &feature_mod_names,
+        &path::join(src_folder, "lib.rs").map_err(|source| Error::PathError { source })?,
+    )
+    .map_err(|source| Error::LibRsError { source })?;
 
     Ok(())
 }
