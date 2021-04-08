@@ -14,7 +14,6 @@ const OUTPUT_FOLDER: &str = "../azure-sdk-for-rust/services/mgmt";
 const ONLY_SERVICES: &[&str] = &[
     // "vmware",
     // "network",
-    // "cosmos-db",
 ];
 
 const SKIP_SERVICES: &[&str] = &[
@@ -32,15 +31,15 @@ const SKIP_SERVICES: &[&str] = &[
 ];
 
 const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
+    ("analysisservices", "package-2017-08"),
+    ("authorization", "package-2018-05-01-preview"),
+    ("authorization", "package-2021-03-01-preview-only"),
     ("azureactivedirectory", "package-preview-2020-07"),
-    ("resources", "package-policy-2020-03"),
-    ("resources", "package-policy-2020-09"), // SchemaNotFound { ref_key: RefKey { file_path: "../azure-rest-api-specs/specification/resources/resource-manager/Microsoft.Authorization/stable/2020-09-01/dataPolicyManifests.json", name: "CloudError"
-    ("recoveryservicesbackup", "package-2020-07"), // duplicate fn get_operation_status
-    ("recoveryservicesbackup", "package-2020-10"), // duplicate fn get_operation_status
-    ("network", "package-2017-03-30-only"),  // SchemaNotFound 2017-09-01/network.json SubResource
-    ("synapse", "package-2019-06-01-preview"), // TODO #80 path parameters
-    ("recoveryservicessiterecovery", "package-2016-08"), // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
-    ("mediaservices", "package-2019-05-preview"), // invalid unicode character of a dash instead of a hyphen https://github.com/Azure/azure-rest-api-specs/pull/11576
+    ("compute", "package-2020-10-01-preview"),      // TODO #81 DataType::File
+    ("compute", "package-2020-10-01-preview-only"), // TODO #81 DataType::File
+    ("compute", "package-2021-03-01"),              // TODO #81 DataType::File
+    ("compute", "package-2021-03-01-only"),         // TODO #81 DataType::File
+    ("consumption", "package-2019-11"),             // ReservationRecommendationDetails_Get has a path and query param both named "scope"
     // datamigration, same error for all
     // SchemaNotFound MigrateSqlServerSqlDbTask.json ValidationStatus, but may be buried
     ("datamigration", "package-2018-07-15-preview"),
@@ -48,11 +47,18 @@ const SKIP_SERVICE_TAGS: &[(&str, &str)] = &[
     ("datamigration", "package-2018-03-31-preview"),
     ("datamigration", "package-2018-03-15-preview"),
     ("datamigration", "package-2017-11-15-preview"),
-    ("compute", "package-2020-10-01-preview"),      // TODO #81 DataType::File
-    ("compute", "package-2020-10-01-preview-only"), // TODO #81 DataType::File
-    ("authorization", "package-2018-05-01-preview"),
+    ("mediaservices", "package-2019-05-preview"), // invalid unicode character of a dash instead of a hyphen https://github.com/Azure/azure-rest-api-specs/pull/11576
     ("marketplace", "package-composite-v1"),
+    ("network", "package-2017-03-30-only"), // SchemaNotFound 2017-09-01/network.json SubResource
+    ("recoveryservicesbackup", "package-2020-07"), // duplicate fn get_operation_status
+    ("recoveryservicesbackup", "package-2020-10"), // duplicate fn get_operation_status
+    ("recoveryservicessiterecovery", "package-2016-08"), // duplicate package-2016-08 https://github.com/Azure/azure-rest-api-specs/pull/11287
+    ("resources", "package-policy-2020-03"),
+    ("resources", "package-policy-2020-09"), // SchemaNotFound { ref_key: RefKey { file_path: "../azure-rest-api-specs/specification/resources/resource-manager/Microsoft.Authorization/stable/2020-09-01/dataPolicyManifests.json", name: "CloudError"
+    ("security", "package-2020-01-preview-only"), // duplicate tag https://github.com/Azure/azure-rest-api-specs/pull/13828
+    ("synapse", "package-2019-06-01-preview"), // TODO #80 path parameters
     ("synapse", "package-2020-12-01"),
+    ("synapse", "package-2021-03"),
 ];
 
 // becuse of recursive types, some properties have to be boxed
@@ -61,19 +67,24 @@ const BOX_PROPERTIES: &[(&str, &str, &str)] = &[
     // cost-management
     ("../azure-rest-api-specs/specification/cost-management/resource-manager/Microsoft.CostManagement/stable/2020-06-01/costmanagement.json", "ReportConfigFilter", "not"),
     ("../azure-rest-api-specs/specification/cost-management/resource-manager/Microsoft.CostManagement/stable/2020-06-01/costmanagement.json", "QueryFilter", "not"),
-    // network
-    ("../azure-rest-api-specs/specification/network/resource-manager/Microsoft.Network/stable/2020-07-01/publicIpAddress.json", "PublicIPAddressPropertiesFormat", "ipConfiguration"),
-    ("../azure-rest-api-specs/specification/network/resource-manager/Microsoft.Network/stable/2020-08-01/publicIpAddress.json", "PublicIPAddressPropertiesFormat", "ipConfiguration"),
     // databox
     ("../azure-rest-api-specs/specification/databox/resource-manager/Microsoft.DataBox/stable/2020-11-01/databox.json", "transferFilterDetails", "include"),
     ("../azure-rest-api-specs/specification/databox/resource-manager/Microsoft.DataBox/stable/2020-11-01/databox.json", "transferAllDetails", "include"),
+    ("../azure-rest-api-specs/specification/databox/resource-manager/Microsoft.DataBox/stable/2021-03-01/databox.json", "transferFilterDetails", "include"),
+    ("../azure-rest-api-specs/specification/databox/resource-manager/Microsoft.DataBox/stable/2021-03-01/databox.json", "transferAllDetails", "include"),
+    // dataprotection
+    ("../azure-rest-api-specs/specification/dataprotection/resource-manager/Microsoft.DataProtection/stable/2021-01-01/dataprotection.json", "InnerError", "embeddedInnerError"),
+    // hardwaresecuritymodels
+    ("../azure-rest-api-specs/specification/hardwaresecuritymodules/resource-manager/Microsoft.HardwareSecurityModules/preview/2018-10-31-preview/dedicatedhsm.json", "Error", "innererror"),
     // logic
     ("../azure-rest-api-specs/specification/logic/resource-manager/Microsoft.Logic/stable/2019-05-01/logic.json", "SwaggerSchema", "items"),
     // migrateprojects
     ("../azure-rest-api-specs/specification/migrateprojects/resource-manager/Microsoft.Migrate/preview/2018-09-01-preview/migrate.json", "IEdmNavigationProperty", "partner"),
     ("../azure-rest-api-specs/specification/migrateprojects/resource-manager/Microsoft.Migrate/preview/2018-09-01-preview/migrate.json", "IEdmStructuredType", "baseType"),
-    // hardwaresecuritymodels
-    ("../azure-rest-api-specs/specification/hardwaresecuritymodules/resource-manager/Microsoft.HardwareSecurityModules/preview/2018-10-31-preview/dedicatedhsm.json", "Error", "innererror"),
+    // network
+    ("../azure-rest-api-specs/specification/network/resource-manager/Microsoft.Network/stable/2020-07-01/publicIpAddress.json", "PublicIPAddressPropertiesFormat", "ipConfiguration"),
+    ("../azure-rest-api-specs/specification/network/resource-manager/Microsoft.Network/stable/2020-08-01/publicIpAddress.json", "PublicIPAddressPropertiesFormat", "ipConfiguration"),
+    ("../azure-rest-api-specs/specification/network/resource-manager/Microsoft.Network/stable/2020-11-01/publicIpAddress.json", "PublicIPAddressPropertiesFormat", "ipConfiguration"),
 ];
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
