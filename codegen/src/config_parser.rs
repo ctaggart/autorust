@@ -28,11 +28,11 @@ pub fn parse_configurations_from_autorest_config_file(config_file: &PathBuf) -> 
                 std::fs::read_to_string(config_file).expect("Unexpected error when reading the received CommonMark configuration file");
             parse_configurations_from_cmark_config(&cmark_content)
         }
-        _ => panic!(format!(
+        _ => panic!(
             "Received AutoRest configuration extension not supported: '{0}' (in configuration file '{1}')",
             extension,
             config_file.as_path().to_str().unwrap()
-        )),
+        ),
     }
 }
 
